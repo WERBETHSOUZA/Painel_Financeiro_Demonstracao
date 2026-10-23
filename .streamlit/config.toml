@@ -1,0 +1,12 @@
+[client]
+# "viewer" tira as opções de desenvolvedor do menu (Clear cache, Rerun, etc.) —
+# evita o aviso "Clear caches" aparecer pro usuário final.
+toolbarMode = "viewer"
+
+[theme]
+base = "dark"
+primaryColor = "#1E88E5"
+backgroundColor = "#0f1117"
+secondaryBackgroundColor = "#1a1d27"
+textColor = "#e0e0e0"
+font = "sans serif"

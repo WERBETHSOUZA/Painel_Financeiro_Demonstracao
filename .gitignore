@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.streamlit/secrets.toml
+_prints_tmp/
+POSTAGEM_LINKEDIN/
+config/permissoes.json
+config/permissoes_backup/

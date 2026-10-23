@@ -1,0 +1,116 @@
+/* ── Fonte base — legível em monitor 24" e TV 50" ───────────────────────── */
+html, body, [class*="css"] {
+    font-size: 14px !important;
+}
+[data-testid="stMarkdown"] p,
+[data-testid="stMarkdown"] li,
+[data-testid="stMarkdown"] span,
+[data-testid="stText"] {
+    font-size: 14px;
+}
+[data-testid="stMetricValue"] {
+    font-size: 1.6rem !important;
+}
+[data-testid="stMetricLabel"] {
+    font-size: 14px !important;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+    background-color: #111827;
+    border-right: 1px solid #1f2937;
+    min-width: 260px !important;
+}
+/* Permite colapsar a zero para o conteúdo expandir */
+[data-testid="stSidebar"][aria-expanded="false"] {
+    min-width: 0 !important;
+    max-width: 0 !important;
+    width: 0 !important;
+    overflow: hidden !important;
+    border-right: none !important;
+}
+
+/* botão de colapso da sidebar — sempre visível */
+[data-testid="stSidebarCollapseButton"] {
+    visibility: visible !important;
+}
+[data-testid="stSidebarHeader"] {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+}
+
+/* ── Botões da sidebar (navegação) ───────────────────────────────────────── */
+[data-testid="stSidebar"] .stButton > button {
+    background-color: #1f2937;
+    color: #e0e0e0;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    text-align: left;
+    transition: background 0.2s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+}
+[data-testid="stSidebar"] .stButton > button p,
+[data-testid="stSidebar"] .stButton > button span {
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+    background-color: #374151;
+    color: #ffffff;
+    border-color: #4b5563;
+}
+
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+[data-testid="stTabs"] [role="tab"] {
+    font-weight: 500;
+    font-size: 14px;
+}
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    border-bottom: 2px solid #6366f1;
+    color: #6366f1;
+}
+
+/* ── Dataframe ───────────────────────────────────────────────────────────── */
+[data-testid="stDataFrame"] {
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* ── Divider ─────────────────────────────────────────────────────────────── */
+hr {
+    border-color: #1f2937;
+    margin: 12px 0;
+}
+
+/* ── Animações de entrada dos gráficos iniciais (só CSS, sem JavaScript) ────────── */
+@keyframes an-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+.an-wipe { animation: an-wipe .9s cubic-bezier(.2, .8, .2, 1) both; }
+
+@property --an-p { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes an-rosca { from { --an-p: 0deg; } to { --an-p: 360deg; } }
+/* a rosca é desenhada pela máscara do anel; somamos uma máscara cônica que avança até 360° */
+.an-rosca {
+    -webkit-mask: radial-gradient(farthest-side, transparent 60%, #000 60%),
+                  conic-gradient(#000 var(--an-p), transparent 0) !important;
+    mask: radial-gradient(farthest-side, transparent 60%, #000 60%),
+          conic-gradient(#000 var(--an-p), transparent 0) !important;
+    -webkit-mask-composite: source-in !important;
+    mask-composite: intersect !important;
+    animation: an-rosca 1.1s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) { .an-wipe, .an-rosca { animation: none; } }
+
+/* gráfico de área/linha (Total Faturado): revelado da esquerda para a direita, com folga para rótulos e pontos */
+@keyframes an-area { from { clip-path: inset(-34px 100% -34px -12px); } to { clip-path: inset(-34px -12px -34px -12px); } }
+.an-area { animation: an-area 1.4s cubic-bezier(.35, .1, .25, 1) both; }
+@media (prefers-reduced-motion: reduce) { .an-area { animation: none; } }

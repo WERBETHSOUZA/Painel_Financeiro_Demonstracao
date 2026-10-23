@@ -1,0 +1,34 @@
+-- =============================================================================
+-- RELATÓRIO DE APROVAÇÃO — APs com status de aprovação  (EXEMPLO com nomes genéricos)
+-- Parâmetros: :dt_ini / :dt_fim (período de emissão).
+-- =============================================================================
+SELECT
+    EM.NOME_EMPRESA                 AS ORG,
+    FI.NOME_FILIAL                  AS FILIAL,
+    AP.NUM_AP                       AS AP,
+    AP.STATUS_APROVACAO             AS STATUS,
+    LISTAGG(AA.NOME_USUARIO, ', ') WITHIN GROUP (ORDER BY AA.ORDEM) AS APROVADORES,
+    TD.SIGLA                        AS "TP DOC",
+    AP.NUM_DOCUMENTO                AS DOC,
+    AP.PARCELA                      AS PARC,
+    FV.NOME_FAVORECIDO              AS FAVORECIDO,
+    AP.SALDO,
+    AP.VALOR,
+    AP.DT_EMISSAO                   AS EMISSAO,
+    AP.DT_ENTRADA                   AS ENTRADA,
+    AP.DT_VENCIMENTO                AS VENCTO,
+    COUNT(AN.ID_ANEXO)              AS QTD_ANEXOS,
+    CASE WHEN COUNT(AN.ID_ANEXO) > 0 THEN 'COM ANEXO' ELSE 'SEM ANEXO' END AS STATUS_ANEXO,
+    MAX(AN.NOME_ARQUIVO)            AS NOME_ANEXO
+FROM DOMINIO.CONTA_PAGAR        AP
+JOIN DOMINIO.EMPRESA            EM ON EM.COD_EMPRESA    = AP.COD_EMPRESA
+JOIN DOMINIO.FILIAL             FI ON FI.COD_FILIAL     = AP.COD_FILIAL
+JOIN DOMINIO.FAVORECIDO         FV ON FV.COD_FAVORECIDO = AP.COD_FAVORECIDO
+JOIN DOMINIO.TIPO_DOCUMENTO     TD ON TD.COD_TIPO_DOC   = AP.COD_TIPO_DOC
+LEFT JOIN DOMINIO.APROVADOR_AP  AA ON AA.ID_AP          = AP.ID_AP
+LEFT JOIN DOMINIO.ANEXO_AP      AN ON AN.ID_AP          = AP.ID_AP
+WHERE AP.DT_EMISSAO BETWEEN :dt_ini AND :dt_fim
+  AND AP.STATUS_APROVACAO IN ('PENDENTE', 'REPROVADO')
+GROUP BY EM.NOME_EMPRESA, FI.NOME_FILIAL, AP.NUM_AP, AP.STATUS_APROVACAO, TD.SIGLA, AP.NUM_DOCUMENTO,
+         AP.PARCELA, FV.NOME_FAVORECIDO, AP.SALDO, AP.VALOR, AP.DT_EMISSAO, AP.DT_ENTRADA, AP.DT_VENCIMENTO
+ORDER BY AP.DT_VENCIMENTO
