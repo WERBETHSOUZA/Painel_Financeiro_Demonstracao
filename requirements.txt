@@ -1,0 +1,8 @@
+streamlit>=1.62
+pandas
+numpy
+openpyxl
+plotly
+altair
+pillow
+requests
