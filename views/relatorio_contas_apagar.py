@@ -75,6 +75,14 @@ def render(df: pd.DataFrame, carregar_desde=None, data_corte=None, atualizar=Non
             default=[s for s in ("VENCIDO", "A VENCER") if s in opcoes_status],
             key="cap_status",
         )
+        # Agente = favorecido do título ("código - nome"), em ordem alfabética do nome; vazio = todos
+        _agentes = (sorted(df["FAVORECIDO"].dropna().astype(str).unique(),
+                           key=lambda s: (s.split(" - ", 1)[-1].casefold(), s))
+                    if "FAVORECIDO" in df.columns else [])
+        agentes_sel = st.multiselect(
+            "Agente", _agentes, key="cap_agente",
+            placeholder="Todos os agentes", help="Um ou mais favorecidos (código - nome). Vazio = todos.",
+        )
         hoje = date.today()
         data_inicio = st.date_input(
             "Data inicial", value=hoje.replace(day=1), format="DD/MM/YYYY", key="cap_data_ini"
@@ -108,11 +116,13 @@ def render(df: pd.DataFrame, carregar_desde=None, data_corte=None, atualizar=Non
     with col_btn:
         st.markdown("<div style='margin-top:1.05rem'></div>", unsafe_allow_html=True)
         if st.button(
-            "🙈 Ocultar" if not _oc_cap else "👁 Exibir",
+            "Ocultar" if not _oc_cap else "Exibir",
+            icon=":material/visibility_off:" if not _oc_cap else ":material/visibility:",
             key="cap_btn_ocultar", use_container_width=True,
             help="Ocultar/exibir valores",
         ):
             st.session_state["cap_ocultar"] = not _oc_cap
+            st.rerun()
     with col_atualizar:
         st.markdown("<div style='margin-top:1.05rem'></div>", unsafe_allow_html=True)
         if st.button("🔄 Atualizar", key="cap_atualizar", use_container_width=True):
@@ -125,7 +135,7 @@ def render(df: pd.DataFrame, carregar_desde=None, data_corte=None, atualizar=Non
         st.info("Informe a **Data inicial** e a **Data final** na barra lateral.")
         return
 
-    # Período anterior à data de corte: busca de novo a partir da Data inicial.
+    # Período anterior à data de corte: busca de novo no Oracle a partir da Data inicial.
     if carregar_desde and data_corte and data_inicio < data_corte:
         with st.spinner(f"Buscando dados desde {data_inicio.strftime('%d/%m/%Y')}..."):
             df = carregar_desde(data_inicio.isoformat())
@@ -140,6 +150,8 @@ def render(df: pd.DataFrame, carregar_desde=None, data_corte=None, atualizar=Non
         df_filtrado = df_filtrado[df_filtrado["TIPO_CLASSIFICACAO"].isin(tipos_sel)]
     if status_sel:
         df_filtrado = df_filtrado[df_filtrado["STATUS"].isin(status_sel)]
+    if agentes_sel and "FAVORECIDO" in df_filtrado.columns:
+        df_filtrado = df_filtrado[df_filtrado["FAVORECIDO"].astype(str).isin(agentes_sel)]
     if "PRORROGADO" in df_filtrado.columns:
         datas = pd.to_datetime(df_filtrado["PRORROGADO"], errors="coerce")
         df_filtrado = df_filtrado[
@@ -174,10 +186,10 @@ def render(df: pd.DataFrame, carregar_desde=None, data_corte=None, atualizar=Non
     _ORDEM_COLUNAS = [
         "ORG", "FILIAL", "AP", "APROVACAO", "APROVADORES", "DOCTO", "PARC",
         "TIPO_DOCTO", "TIPO_FAVORECIDO", "TIPO_CLASSIFICACAO", "CÓD_FORNEC", "FORNECEDOR", "VALOR", "SALDO", "STATUS",
-        "DIAS", "EMISSAO", "ENTRADA", "VENCTO", "PRORROGADO", "FORMA_PAGTO", "PIX",
+        "DIAS", "EMISSAO", "ENTRADA", "PRORROGADO", "FORMA_PAGTO", "PIX",
         "LINHA_DIGITAVEL", "COMPLEMENTO", "ACAO", "RATEIO_CLASSES", "RATEIO_CENTRO_CUSTO",
         "RATEIO_PROJETO", "CATEGORIA_ERRO", "SOLICITANTE", "STATUS_ANEXO",
-        "QTD_ANEXOS", "NOME_ANEXO", "STATUS_DIAS", "FAIXA_DIAS",
+        "QTD_ANEXOS", "ANX_ST_NOME", "STATUS_DIAS", "FAIXA_DIAS",
     ]
     colunas_visuais = [c for c in _ORDEM_COLUNAS if c in df_filtrado.columns]
     colunas_visuais += [c for c in df_filtrado.columns if c not in colunas_visuais]
@@ -189,7 +201,7 @@ def render(df: pd.DataFrame, carregar_desde=None, data_corte=None, atualizar=Non
     # complemento em uma linha só: quebras de linha viram espaço
     if "COMPLEMENTO" in df_exib.columns:
         df_exib["COMPLEMENTO"] = df_exib["COMPLEMENTO"].fillna("").astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
-    for col in ["EMISSAO", "ENTRADA", "VENCTO", "PRORROGADO"]:
+    for col in ["EMISSAO", "ENTRADA", "PRORROGADO"]:
         if col in df_exib.columns:
             df_exib[col] = pd.to_datetime(df_exib[col], errors="coerce").dt.strftime("%d/%m/%Y")
 

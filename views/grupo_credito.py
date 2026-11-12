@@ -1,8 +1,10 @@
+from functools import partial
 import streamlit as st
 import pandas as pd
 from components.buttons import botao_exportar_excel, botoes_acao_row
 from components.cards import card_html, render_cards_row, render_tabela_html, situacao_faturamento
 from utils.exporters import exportar_excel
+from utils.mercado import sufixo_mercado
 from utils.imagem_email import gerar_imagem_resumo_titulos
 from views.contas_receber_painel import _COR_MI, _bloco
 
@@ -157,11 +159,11 @@ def _adiantamento_recebido_por_agente(df_adiantamento) -> dict:
     """Saldo em aberto de adiantamentos RECEBIDOS, somado por código de agente."""
     if df_adiantamento is None or df_adiantamento.empty:
         return {}
-    if not {"NATUREZA", "COD_CLIENTE", "SALDO"}.issubset(df_adiantamento.columns):
+    if not {"NATUREZA", "AGN_IN_CODIGO", "SALDO"}.issubset(df_adiantamento.columns):
         return {}
     recebidos = df_adiantamento[df_adiantamento["NATUREZA"].astype(str).str.upper() == "RECEBIDO"]
     saldo = pd.to_numeric(recebidos["SALDO"], errors="coerce").fillna(0)
-    return saldo.groupby(recebidos["COD_CLIENTE"].astype(str)).sum().to_dict()
+    return saldo.groupby(recebidos["AGN_IN_CODIGO"].astype(str)).sum().to_dict()
 
 
 def _texto_representatividade(df_cr, codigos_clientes: list) -> str | None:
@@ -268,8 +270,8 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
         cor_situacao = "#6366f1"
 
     # Clientes (agentes) do grupo. Adiantamento Recebido não carrega automaticamente: a
-    # consulta calcula o saldo com uma função de saldo por linha, que às
-    # vezes demora muito ou falha — deixava a tela inteira travada por causa
+    # consulta calcula o saldo com uma função Oracle por linha (F_SALDONADATA), que às
+    # vezes demora muito ou falha (ORA-20003) — deixava a tela inteira travada por causa
     # de uma informação que não afeta limite/disponível/consumido/faturado. Agora só roda
     # quando o usuário clica em "Carregar adiantamento" (mesmo padrão da Situação Cliente).
     df_clientes = df_agentes[df_agentes["COD_GRUPO"] == codigo_grupo].copy()         if not df_agentes.empty and "COD_GRUPO" in df_agentes.columns else pd.DataFrame()
@@ -293,65 +295,80 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
     # Só informação atual (o que precisamos analisar antes de faturar) — Adiantamento
     # e Faturado (histórico) saíram desta tela; o histórico foi para o relatório
     # "Faturamento por Cliente/Grupo".
-    render_cards_row([
-        card_html("Limite de crédito total", _formatar_moeda(limite_total), cor_borda="#6366f1"),
-        card_html("Limite de crédito disponível", _formatar_moeda(limite_disponivel),
-                  cor_borda=cor_disponivel, cor_fundo=cor_fundo_disponivel),
-        card_html("Consumido em Nota Fiscal", _formatar_moeda(consumido_nf), cor_borda="#E24B4A"),
-        card_html("Consumido em Pedido de Venda", _formatar_moeda(consumido_pv), cor_borda="#4A7FB5"),
-        card_html("% do limite utilizado", f"{pct_utilizado:.2f}%".replace(".", ","),
-                  cor_borda=cor_disponivel, cor_fundo=cor_fundo_disponivel),
-    ])
-
-    st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
-
     # Adiantamento recebido em aberto do grupo: soma o adiantamento de todos os
     # clientes (agentes) do grupo, só quando o usuário pede (ver comentário acima).
     chave_adto = f"_gc_adto_{codigo_grupo}"
     chave_btn_adto = f"gc_carregar_adto_{codigo_grupo}"
-    valor_adto = _formatar_numero(st.session_state[chave_adto]) if chave_adto in st.session_state else "—"
+    valor_adto = _formatar_moeda(st.session_state[chave_adto]) if chave_adto in st.session_state else "—"
 
-    # Mesmo mecanismo (render_cards_row/card_html, largura fixa 240px + gap 12px) da
-    # linha de cima, pra alinhar exatamente sob as mesmas colunas — st.columns usa
-    # largura proporcional ao container e não bate com a grade de largura fixa.
     _cods_sit_fat = df_clientes["COD_AGENTE"].astype(str).tolist() if not df_clientes.empty else []
     _titulos_sit_fat = (df_contas_receber[df_contas_receber["COD_CLIENTE"].astype(str).isin(_cods_sit_fat)]
                         if df_contas_receber is not None and not df_contas_receber.empty
                         and "COD_CLIENTE" in df_contas_receber.columns else None)
     _sit_fat_val, _sit_fat_sub, _sit_fat_cor = situacao_faturamento(_titulos_sit_fat)
-    render_cards_row([
-        card_html("Situação Documental", situacao_cliente.capitalize(), cor_borda=cor_situacao, topo=True, padding="14px 20px"),
-        card_html("Status", _sit_fat_val, subtitulo=_sit_fat_sub, cor_borda=_sit_fat_cor, topo=True, padding="14px 20px"),
-        card_html(
-            "<span style='display:inline-block;padding-right:32px;box-sizing:border-box;'>"
-            "Adiantamento Recebido em Aberto</span>",
-            valor_adto, cor_borda="#2ECC71", topo=True, padding="14px 20px",
-        ),
-    ])
-    # Botão fica sobreposto no canto superior direito do card (não embaixo), em azul.
-    st.markdown(
-        f"<style>div[class*='st-key-{chave_btn_adto}'] {{"
-        f" margin-left: 710px; margin-top: -110px; width: 28px; max-width: 28px; }}"
-        f"div[class*='st-key-{chave_btn_adto}'] button {{"
-        f" width: 28px; height: 28px; padding: 0; min-height: 0; border-radius: 6px;"
-        f" background-color: #1E88E5; border-color: #1E88E5; color: #ffffff; }}"
-        f"div[class*='st-key-{chave_btn_adto}'] button:hover {{"
-        f" background-color: #1669B3; border-color: #1669B3; color: #ffffff; }}</style>",
-        unsafe_allow_html=True,
-    )
-    if st.button("", icon=":material/refresh:", key=chave_btn_adto,
-                 help="Carregar adiantamento", disabled=carregar_adiantamento is None):
-        _aviso_adto.info("⏳ Consultando adiantamento...")
-        df_adto = carregar_adiantamento()
-        _aviso_adto.empty()
-        mapa_adto = _adiantamento_recebido_por_agente(df_adto)
-        codigos_grupo = df_clientes["COD_AGENTE"].astype(str).tolist() if not df_clientes.empty else []
-        st.session_state[chave_adto] = float(sum(mapa_adto.get(cod, 0.0) for cod in codigos_grupo))
-        st.rerun()
+    st.subheader(f"GRUPO - {grupo_sel}{sufixo_mercado(_titulos_sit_fat)}")
 
-    # Compensa o margin-top negativo do botão (senão o divisor sobe junto e fica
-    # sobreposto nos cards).
-    st.markdown("<div style='height:110px;'></div>", unsafe_allow_html=True)
+    # Todos os cards vêm numa lista só e são distribuídos em linhas de no máximo 4, o mais parelhas possível
+    # (a última linha é sempre a que tem menos cards); cada card ocupa a largura da sua coluna, então o valor não corta.
+    _cartao = partial(card_html, largura="100%", altura="112px", padding="14px 20px", topo=True)
+    _ADTO = object()   # no lugar do card de adiantamento, que leva o botão de atualizar por cima
+    _cards_gc = [
+        _cartao("Limite de crédito total", _formatar_moeda(limite_total), cor_borda="#6366f1"),
+        _cartao("Limite de crédito disponível", _formatar_moeda(limite_disponivel),
+                cor_borda=cor_disponivel, cor_fundo=cor_fundo_disponivel),
+        _cartao("Consumido em Nota Fiscal", _formatar_moeda(consumido_nf), cor_borda="#E24B4A"),
+        _cartao("Consumido em Pedido de Venda", _formatar_moeda(consumido_pv), cor_borda="#4A7FB5"),
+        _cartao("% do limite utilizado", f"{pct_utilizado:.2f}%".replace(".", ","),
+                cor_borda=cor_disponivel, cor_fundo=cor_fundo_disponivel),
+        _cartao("Situação Documental", situacao_cliente.capitalize(), cor_borda=cor_situacao),
+        _cartao("Status", _sit_fat_val, subtitulo=_sit_fat_sub, cor_borda=_sit_fat_cor),
+        _ADTO,
+    ]
+    _linhas_total = -(-len(_cards_gc) // 4)
+    _base, _extra = divmod(len(_cards_gc), _linhas_total)
+    _tamanhos = [_base + (1 if k < _extra else 0) for k in range(_linhas_total)]
+    _pos = 0
+    for _n_linha, _tam in enumerate(_tamanhos):
+        if _n_linha:   # espaço entre uma linha de cards e a de baixo (igual ao espaço entre colunas)
+            st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+        _cols = st.columns(max(_tamanhos))
+        for _k in range(_tam):
+            with _cols[_k]:
+                _card = _cards_gc[_pos]
+                if _card is _ADTO:
+                    with st.container(key="gc_adto_wrap"):
+                        st.markdown(_cartao(
+                            "<span style='display:inline-block;padding-right:32px;box-sizing:border-box;'>"
+                            "Adiantamento em Aberto</span>",
+                            valor_adto, cor_borda="#2ECC71",
+                        ), unsafe_allow_html=True)
+                        # Botão sobreposto no canto superior direito do card, em azul.
+                        st.markdown(
+                            f"<style>div[class*='st-key-gc_adto_wrap'] {{ position:relative !important; }}"
+                            f"div[class*='st-key-{chave_btn_adto}'] {{"
+                            f" position:absolute !important; top:10px !important; right:10px !important;"
+                            f" margin:0 !important; width:28px !important; max-width:28px !important; z-index:10; }}"
+                            f"div[class*='st-key-{chave_btn_adto}'] button {{"
+                            f" width:28px; height:28px; padding:0; min-height:0; border-radius:6px;"
+                            f" background-color:#1E88E5; border-color:#1E88E5; color:#ffffff; }}"
+                            f"div[class*='st-key-{chave_btn_adto}'] button:hover {{"
+                            f" background-color:#1669B3; border-color:#1669B3; color:#ffffff; }}</style>",
+                            unsafe_allow_html=True,
+                        )
+                        if st.button("", icon=":material/refresh:", key=chave_btn_adto,
+                                     help="Carregar adiantamento", disabled=carregar_adiantamento is None):
+                            _aviso_adto.info("⏳ Consultando adiantamento...")
+                            df_adto = carregar_adiantamento()
+                            _aviso_adto.empty()
+                            mapa_adto = _adiantamento_recebido_por_agente(df_adto)
+                            codigos_grupo = df_clientes["COD_AGENTE"].astype(str).tolist() if not df_clientes.empty else []
+                            st.session_state[chave_adto] = float(sum(mapa_adto.get(cod, 0.0) for cod in codigos_grupo))
+                            st.rerun()
+                else:
+                    st.markdown(_card, unsafe_allow_html=True)
+            _pos += 1
+
+    st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
 
     # Aviso de representatividade do grupo por mercado.
     codigos_grupo = df_clientes["COD_AGENTE"].astype(str).tolist() if not df_clientes.empty else []
@@ -438,7 +455,7 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
                 {"label": "Status", "valor": _sit_fat_val.replace("<br>", chr(10)), "cor": (226, 75, 74) if "Bloqueado" in _sit_fat_val else (34, 197, 94)},
             ]
             cards_para_imagem.append({
-                "label": "Adiantamento Recebido em Aberto",
+                "label": "Adiantamento em Aberto",
                 "valor": valor_adto,
                 "cor": (46, 204, 113),
             })

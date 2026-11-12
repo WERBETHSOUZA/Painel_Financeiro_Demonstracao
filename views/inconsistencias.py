@@ -13,8 +13,21 @@ _PALETA_CATEGORIAS = ["#E24B4A", "#BA7517", "#4A7FB5", "#7B68B5", "#2ECC71", "#E
 _gerar_imagem_cached = st.cache_data(show_spinner=False, max_entries=20)(gerar_imagem_inconsistencias)
 
 
+def _inteiros_sem_decimal(df: pd.DataFrame) -> pd.DataFrame:
+    """Códigos e números (AP, Num_Lancto, Cód_Agente...) chegam do Oracle como decimal (409305.0). Colunas numéricas cujos
+    valores são todos inteiros viram inteiro, na tela, no Excel e na imagem. Valores em dinheiro (SALDO) ficam como estão."""
+    df = df.copy()
+    for c in df.columns:
+        if "SALDO" in c or "VALOR" in c or not pd.api.types.is_float_dtype(df[c]):
+            continue
+        v = df[c].dropna()
+        if len(v) and (v % 1 == 0).all():
+            df[c] = df[c].astype("Int64").astype(object).where(df[c].notna(), None)
+    return df
+
+
 def render(df_erros: pd.DataFrame):
-    df_filtrado = df_erros
+    df_filtrado = _inteiros_sem_decimal(df_erros)
 
     if len(df_filtrado) == 0:
         st.title("Inconsistências de Lançamentos")
@@ -29,6 +42,21 @@ def render(df_erros: pd.DataFrame):
         if st.button("🔄 Atualizar", key="inc_atualizar", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
+
+    # ── Filtro por solicitante (barra lateral): vale para cards, resumo, tabela, Excel e imagem ──────────────
+    _col_sol = next((c for c in df_filtrado.columns if "SOLICITANTE" in c), None)
+    sol_sel = []
+    if _col_sol:
+        solicitantes_lista = sorted(df_filtrado[_col_sol].dropna().unique().tolist())
+        with st.sidebar:
+            st.caption("Inconsistências de Lançamentos")
+            sol_sel = st.multiselect("Solicitante", solicitantes_lista, key="inc_filtro_sol",
+                                     placeholder="Todos os solicitantes")
+        if sol_sel:
+            df_filtrado = df_filtrado[df_filtrado[_col_sol].isin(sol_sel)]
+            if df_filtrado.empty:
+                st.info("Nenhuma inconsistência para os solicitantes selecionados.")
+                return
 
     # Colunas chegam em maiúsculas do data_service (_limpar_colunas faz .upper())
     # Aliases do SQL: Organização→ORGANIZAÇÃO, Cód_Filial→CÓD_FILIAL, Num_Lancto→NUM_LANCTO
@@ -85,30 +113,11 @@ def render(df_erros: pd.DataFrame):
 
     st.divider()
 
-    # ── Filtro por solicitante ────────────────────────────────────────────────
-    col_titulo, col_filtro, col_qtd = st.columns([3, 3, 1], vertical_alignment="center")
+    col_titulo, col_qtd = st.columns([6, 1], vertical_alignment="center")
     with col_titulo:
         st.subheader("Inconsistências de Lançamentos")
 
-    _col_sol = next((c for c in df_filtrado.columns if "SOLICITANTE" in c), None)
-
-    solicitantes_lista = []
-    if _col_sol:
-        solicitantes_lista = sorted(df_filtrado[_col_sol].dropna().unique().tolist())
-
-    sol_sel = None
-    if solicitantes_lista:
-        with col_filtro:
-            sol_sel = st.selectbox(
-                "Solicitante",
-                ["Todos"] + solicitantes_lista,
-                label_visibility="collapsed",
-                key="inc_filtro_sol",
-            )
-
     df_exib = df_filtrado.copy()
-    if sol_sel and sol_sel != "Todos" and _col_sol:
-        df_exib = df_exib[df_exib[_col_sol] == sol_sel]
 
     # Coluna Observação calculada a partir da categoria de erro
     df_exib = df_exib.copy()
@@ -121,6 +130,9 @@ def render(df_erros: pd.DataFrame):
     # de custo) viram " | ". Excel e PNG seguem com o texto original.
     df_tela = df_exib.copy()
     for _c in df_tela.columns:
+        if pd.api.types.is_datetime64_any_dtype(df_tela[_c]):     # datas na tela: dd/mm/aaaa
+            df_tela[_c] = df_tela[_c].dt.strftime("%d/%m/%Y").fillna("")
+            continue
         if pd.api.types.is_string_dtype(df_tela[_c]):
             df_tela[_c] = df_tela[_c].map(
                 lambda v: re.sub(r"\s*[\r\n]+\s*", " | ", v) if isinstance(v, str) else v
@@ -132,8 +144,8 @@ def render(df_erros: pd.DataFrame):
 
     # ── PNG ───────────────────────────────────────────────────────────────────
     titulo_png = "Inconsistências de Lançamentos"
-    if sol_sel and sol_sel != "Todos":
-        titulo_png += f" — {sol_sel}"
+    if sol_sel:
+        titulo_png += " — " + ", ".join(sol_sel)
     imagem_bytes = _gerar_imagem_cached(df_exib, titulo=titulo_png)
 
     botoes_acao_row(

@@ -11,14 +11,18 @@ de Crédito, pra colar em e-mail).
 
 from functools import partial
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
 from components.buttons import botao_exportar_excel, botoes_acao_row
 from components.cards import tamanho_auto, card_html, render_cards_row, render_tabela_html, situacao_faturamento
-from utils.exporters import exportar_excel_faturamento_cliente_grupo
+from config import pagador
+from services.data_service import carregar_historico_pagamentos_me, carregar_historico_pagamentos_mi
+from utils.exporters import adicionar_perfil_e_titulos_pagos, exportar_excel, exportar_excel_faturamento_cliente_grupo
 from utils.prazos import calcular_dias_prazo, formatar_dias_html, formatar_dias_unificado_html, nullar_zeros_dias, texto_dias_para_imagem, VERDE_DIAS, VERMELHO_DIAS
 from utils.imagem_email import gerar_imagem_resumo_titulos
+from utils.mercado import sufixo_mercado
 from views.contas_receber_painel import _COR_MI, _abrev, _bloco
 from views.faturamento_ano import (_MESES, dados_faturamento_ano, dados_faturamento_mes, dados_variacao_anual,
                                    html_grafico_faturamento, html_grafico_faturamento_mes,
@@ -67,7 +71,7 @@ def _cor_situacao(situacao: str) -> str:
 
 def _regra_desconto(df_cr_sel: pd.DataFrame) -> str:
     """Regra de desconto (Faturamento/Financeiro + %) do cliente, vinda do
-    cadastro de regras do cliente — só existe nos títulos em aberto do
+    cadastro (COMERCIAL.IBA_REGRASCLI) — só existe nos títulos em aberto do
     cliente. Se houver mais de uma regra distinta na seleção (grupo com
     clientes diferentes), mostra "Vários". Sem título/regra = "Sem desconto"."""
     if df_cr_sel.empty or not {"TIPO_REGRA", "PERC_REGRA"}.issubset(df_cr_sel.columns):
@@ -162,6 +166,148 @@ def _html_distribuicao_estado(df_cr_sel: pd.DataFrame, uf_map: dict) -> str:
 
 
 _card_topo = partial(card_html, topo=True, padding="14px 12px")
+
+
+def _fmt_dias(v: float) -> str:
+    return f"{v:.1f}".replace(".", ",")
+
+
+def _historico_pagamentos(codigos_str: list):
+    """Histórico de pagamentos (Mercado Interno) dos clientes, já classificado. Vazio se não houver parcelas."""
+    df = carregar_historico_pagamentos_mi(tuple(codigos_str))
+    if df is None or df.empty:
+        return pd.DataFrame()
+    return pagador.classificar_parcelas(df)
+
+
+def _card_perfil_pagamento(df_hist: pd.DataFrame, altura: str) -> str:
+    """Card "Perfil de pagamento" (todo o histórico de pagamentos; janela em pagador.MESES_CARD): bom / regular / atenção / mau pagador."""
+    r = pagador.resumir(df_hist, pagador.MESES_CARD) if not df_hist.empty else {"perfil": "Sem histórico", "parcelas": 0}
+    cor = pagador.COR_PERFIL[r["perfil"]]
+    # Só o essencial: o percentual do valor pago no prazo (12 meses) e o perfil em destaque
+    sub = f"{_fmt_dias(r['pct_prazo'])}% no prazo" if r["parcelas"] >= pagador.MIN_PARCELAS else "poucas parcelas pagas"
+    return _card_topo("Perfil de pagamento", r["perfil"].title(), subtitulo=sub, cor_borda=cor,
+                      cor_fundo=pagador.FUNDO_PERFIL[r["perfil"]], largura="100%", altura=altura,
+                      tamanho_valor=tamanho_auto(r["perfil"].title(), 26, fator=0.5))
+
+
+def _excel_historico(df_tab: pd.DataFrame, titulo: str) -> bytes:
+    return exportar_excel(df_tab, "HISTORICO_PAGAMENTOS", colunas_moeda=("Valor da parcela", "Valor pago"),
+                          titulo_planilha=f"Histórico de pagamentos — {titulo}")
+
+
+def _resumo_pagador(df_hist: pd.DataFrame, meses) -> None:
+    """Perfil do pagador no período `meses` (12, 24 ou None = todo o histórico): banner com o
+    perfil e os números, e uma barra única com as faixas de pagamento que têm parcelas."""
+    if df_hist.empty:
+        st.info("Nenhuma parcela do Mercado Interno encontrada para esta seleção.")
+        return
+    r = pagador.resumir(df_hist, meses)
+    cor = pagador.COR_PERFIL[r["perfil"]]
+    if r["parcelas"] == 0:
+        st.info("Nenhuma parcela paga nesse período.")
+        return
+    motivo = (f"{_fmt_dias(r['pct_prazo'])}% do valor pago no prazo · atraso médio ponderado de "
+              f"{_fmt_dias(r['atraso_medio'])} dia(s) · pior atraso de {r['pior_atraso']} dia(s)")
+    if r["parcelas"] < pagador.MIN_PARCELAS:
+        motivo = f"só {r['parcelas']} parcela(s) paga(s) no período (mínimo de {pagador.MIN_PARCELAS}) · " + motivo
+    recente = ""
+    if meses is None:
+        r12 = pagador.resumir(df_hist, 12)
+        if r12["parcelas"] > 0:
+            recente = (f'<div style="font-size:12px;color:#ffffff;margin-top:6px">Últimos 12 meses: '
+                       f'{_fmt_dias(r12["pct_prazo"])}% no prazo · {r12["perfil"]}</div>')
+    st.markdown(
+        f'<div style="border-left:4px solid {cor};background:{pagador.FUNDO_PERFIL[r["perfil"]]};border-radius:8px;padding:10px 14px;margin:6px 0 0">'
+        f'<div style="font-size:18px;font-weight:700;color:#ffffff">{r["perfil"]}</div>'
+        f'<div style="font-size:12px;color:#aab4c4;margin-top:3px;line-height:1.5">{motivo}</div>{recente}</div>', unsafe_allow_html=True)
+
+    # Barra única com as faixas que têm parcelas, e legenda curta embaixo
+    fx = [(rot, q) for rot, q in pagador.faixas(df_hist, meses) if q > 0]
+    total_fx = sum(q for _, q in fx) or 1
+    segmentos = "".join(f'<div style="width:{q / total_fx * 100:.2f}%;background:{pagador.COR_FAIXA[rot]}"></div>' for rot, q in fx)
+    legenda = "".join(
+        f'<span style="display:flex;align-items:center;gap:6px"><i style="width:10px;height:10px;border-radius:2px;'
+        f'background:{pagador.COR_FAIXA[rot]};display:block"></i>{rot} · {q} ({_fmt_dias(q / total_fx * 100)}%)</span>'
+        for rot, q in fx)
+    if all(rot in ("Pago antecipado", "Pago no prazo") for rot, _ in fx):
+        legenda += '<span style="color:#8892a4">Sem atrasos no período</span>'
+    st.markdown(
+        f'<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin:12px 0 8px;'
+        f'background:rgba(128,128,128,0.15)">{segmentos}</div>'
+        f'<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#cfd3dc">{legenda}</div>',
+        unsafe_allow_html=True)
+
+
+def _corpo_historico(df_hist: pd.DataFrame, nomes: dict, eh_grupo: bool, titulo: str, meses) -> None:
+    """Tabela do "Histórico de pagamentos" para o período `meses` (12, 24 ou None = todo o
+    histórico): notas com emissão, vencimento e pagamento."""
+    if df_hist.empty:
+        return
+    # Tabela: parcelas pagas no período + as ainda em aberto, da emissão mais recente para a mais antiga
+    _me = "VALOR_MOEDA" in df_hist.columns   # Mercado Externo: prazo diferente, então sem classificar atraso (só pago, a vencer, vencido)
+    if _me:
+        tab = df_hist
+    else:
+        pagas = pagador.pagas_na_janela(df_hist, meses)
+        abertas = df_hist[df_hist["CLASSIFICACAO"].isin([pagador.ROTULO_ABERTO_VENCIDO, pagador.ROTULO_ABERTO_A_VENCER])]
+        tab = pd.concat([pagas, abertas])
+    tab = tab.sort_values(["PRORROGADO", "DOC", "PARC"], ascending=[False, False, True])   # pela data de prorrogação, nos dois mercados
+    if tab.empty:
+        return
+    nome_cli = tab["AGN"].astype(int).astype(str).map(lambda c: f"{nomes.get(c, c)} - {c}")
+    base = pd.DataFrame({
+        "Cliente": nome_cli.values, "NF": tab["DOC"].values, "Parcela": tab["PARC"].values,
+        "Emissão da nota": tab["EMISSAO"].values, "Vencimento": tab["PRORROGADO"].values,
+        "Vencimento original": tab["VENCTO"].values, "Crédito esperado": tab["CREDITO_ESPERADO"].values,
+        "Data do pagamento": tab["DT_ULT_PAG"].values, "Valor da parcela": tab["VALOR_PARCELA"].values,
+        "Valor pago": tab["VALOR_PAGO"].values, "Saldo em aberto": tab["SALDO"].values,
+        "Dias de atraso": tab["DIAS_ATRASO"].values, "Classificação": tab["CLASSIFICACAO"].values,
+    })
+    # Vencimento = o original e Prorrogado = a data prorrogada (a que ordena a tabela), no MI e no ME
+    base["Prorrogado"] = base["Vencimento"]
+    base["Vencimento"] = base["Vencimento original"]
+    base = base.drop(columns=["Vencimento original"])
+    if _me:
+        base["Valor na moeda"] = [
+            f"{_SIMBOLOS_MOEDA.get(m, m)} {_formatar_numero(v)}" if m not in (None, "R$") and pd.notna(v) and v else "-"
+            for m, v in zip(tab["MOEDA"], tab["VALOR_MOEDA"])]
+    df_excel = base.copy()
+    if not eh_grupo:
+        df_excel = df_excel.drop(columns=["Cliente"])
+
+    # Dias Vencto. só das parcelas em aberto (negativo = vencido, positivo = a vencer), como nas demais telas
+    _hoje = pd.Timestamp.today().normalize()
+    _em_aberto = tab["CLASSIFICACAO"].isin([pagador.ROTULO_ABERTO_VENCIDO, pagador.ROTULO_ABERTO_A_VENCER]).values
+    base["Dias Vencto."] = np.where(_em_aberto, (pd.to_datetime(tab["PRORROGADO"]).values - _hoje.to_datetime64())
+                                    .astype("timedelta64[D]").astype(float), np.nan)
+    tela = base[["Cliente", "NF", "Parcela", "Emissão da nota", "Vencimento", "Prorrogado", "Data do pagamento"]
+                + (["Valor na moeda"] if _me else [])
+                + ["Valor da parcela", "Saldo em aberto", "Dias Vencto."] + ([] if _me else ["Dias de atraso"]) + ["Classificação"]].copy()
+    if not eh_grupo:
+        tela = tela.drop(columns=["Cliente"])
+    for c in ("Emissão da nota", "Vencimento", "Prorrogado", "Data do pagamento"):
+        if c not in tela.columns:
+            continue
+        tela[c] = pd.to_datetime(tela[c], errors="coerce").dt.strftime("%d/%m/%Y").fillna("-")
+    tela["Valor da parcela"] = tela["Valor da parcela"].apply(_formatar_moeda)
+    tela["Saldo em aberto"] = [_formatar_moeda(s) if aberto else "-" for s, aberto in zip(tela["Saldo em aberto"], _em_aberto)]
+    tela["Dias Vencto."] = tela["Dias Vencto."].apply(lambda d: "-" if pd.isna(d) else str(int(d)))
+    if "Dias de atraso" in tela.columns:
+        # Só atraso tem número; pago no prazo ou antecipado (zero ou negativo) não é atraso, então "-".
+        tela["Dias de atraso"] = tela["Dias de atraso"].apply(lambda v: "-" if pd.isna(v) or v <= 0 else str(int(v)))
+    if _me:
+        _rot_me = {pagador.ROTULO_ABERTO_VENCIDO: "Vencido", pagador.ROTULO_ABERTO_A_VENCER: "A vencer"}
+        _cor_me = {"Pago": "#1BADA6", "A vencer": "#22c55e", "Vencido": "#E24B4A"}
+        tela["Classificação"] = tela["Classificação"].map(lambda c: _rot_me.get(c, "Pago")).map(
+            lambda c: f'<span style="color:{_cor_me[c]};font-weight:600">{c}</span>')
+    else:
+        tela["Classificação"] = tela["Classificação"].apply(
+            lambda c: f'<span style="color:{pagador.COR_FAIXA.get(c, "#8892a4")};font-weight:600">{c}</span>')
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+    st.caption(f"{len(tela)} parcela(s), pagas e em aberto, da data de prorrogação mais recente para a mais antiga.")
+    render_tabela_html(tela, colunas_moeda=["Valor da parcela", "Saldo em aberto"], altura=420)
+    # O Excel do histórico agora é a própria planilha do painel (botão no fim da página): abas Resumo, Títulos em Aberto e Títulos Pagos.
 
 
 def _pct1(valor: float) -> str:
@@ -327,24 +473,44 @@ def render(
     cor_fundo_disp = {"#22c55e": "#16261c", "#EF9F27": "#2b2313"}.get(cor_disp, "#2b1818")
     cor_sit = _cor_situacao(situacao_cliente)
 
-    # Adiantamento recebido em aberto: consulta às vezes lenta/instável (função
-    # por linha) — só roda quando o usuário pede (mesmo padrão da
+    # Adiantamento recebido em aberto: consulta Oracle às vezes lenta/instável (função
+    # por linha, F_SALDONADATA) — só roda quando o usuário pede (mesmo padrão da
     # Situação Cliente e do Grupo de Crédito), pra não travar a abertura da tela.
     chave_sel_adto = codigo_grupo if eh_grupo else codigos_str[0]
     chave_adto = f"_fcg_adto_{chave_sel_adto}"
     chave_btn_adto = f"fcg_carregar_adto_{chave_sel_adto}"
     adiantamento = st.session_state.get(chave_adto)
 
-    # Regra de desconto é do CADASTRO DO CLIENTE (tabela de regras) — não
+    # Regra de desconto é do CADASTRO DO CLIENTE (COMERCIAL.IBA_REGRASCLI) — não
     # faz sentido resumir num grupo com vários clientes, então só aparece no
     # modo Cliente.
     regra_desconto = _regra_desconto(df_cr_sel) if not eh_grupo else None
 
     _aviso_adto = st.empty()
 
+    # Histórico de pagamentos: liberado para todos que acessam o painel (card de perfil, seção de histórico e Excel completo).
+    # Clientes só do Mercado Externo não são classificados (sem card de perfil nem histórico): a regra é do Mercado Interno.
+    _so_me = tem_me and not (df_cr_sel["MERCADO"] == "MI").any()
+    _com_historico = not _so_me
+    # Mercado no título (pelos títulos em aberto da seleção): "GRUPO - X - Mercado Interno", "... - Mercado Externo" ou os dois.
+    titulo_escolhido += sufixo_mercado(df_cr_sel)
+    df_hist = pd.DataFrame()
+    df_hist_me = pd.DataFrame()
+    if _com_historico:
+        with st.spinner("Carregando histórico de pagamentos..."):
+            df_hist = _historico_pagamentos(codigos_str)
+    elif _so_me:
+        with st.spinner("Carregando histórico de títulos..."):
+            df_hist_me = carregar_historico_pagamentos_me(tuple(codigos_str))
+        if not df_hist_me.empty:   # mesma classificação do Mercado Interno (pago no prazo, atraso, em aberto a vencer/vencido)
+            df_hist_me["DESCONTO"] = 0.0
+            df_hist_me["BAIXA_ADIANT"] = 0.0
+            df_hist_me = pagador.classificar_parcelas(df_hist_me)
+    _hist_me = not df_hist_me.empty   # Externo: só a tabela do histórico, no lugar dos títulos em aberto
+
     st.subheader(titulo_escolhido)
 
-    valor_adto_card = _formatar_numero(adiantamento) if adiantamento is not None else "—"
+    valor_adto_card = _formatar_moeda(adiantamento) if adiantamento is not None else "—"
     valor_regra_card = None
     if regra_desconto is not None:
         # No card, "TIPO — 12.30%" vira duas linhas (tipo em cima, % embaixo, maior
@@ -373,38 +539,8 @@ def render(
     _valores += [f"{_SIMBOLOS_MOEDA.get(m, m)} {_formatar_numero(df_cr_sel.loc[df_cr_sel['MOEDA'] == m, 'SALDO_MOEDA'].sum())}"
                  for m in moedas_estrangeiras]
     _card_num = partial(_card_topo, tamanho_valor=tamanho_auto(max(_valores, key=len), 26, fator=0.5))
-    _l1 = st.columns(_n)
-    with _l1[0]:
-        st.markdown(_card_num("Limite Total", _formatar_moeda(limite_total),
-                              cor_borda="#6366f1", largura="100%", altura=_H), unsafe_allow_html=True)
-    with _l1[1]:
-        st.markdown(_card_num("Limite Consumido NF + PV", _formatar_moeda(consumido_nf + consumido_pv),
-                              cor_borda="#E24B4A", largura="100%", altura=_H),
-                    unsafe_allow_html=True)
-    with _l1[2]:
-        st.markdown(_card_num("Limite Disponível", _formatar_moeda(limite_disponivel),
-                              cor_borda=cor_disp, cor_fundo=cor_fundo_disp, largura="100%", altura=_H),
-                    unsafe_allow_html=True)
-    with _l1[3]:
-        st.markdown(_card_num("% Limite Utilizado", f"{pct_utilizado:.2f}%".replace(".", ","),
-                              cor_borda=cor_disp, cor_fundo=cor_fundo_disp, largura="100%", altura=_H),
-                    unsafe_allow_html=True)
-    with _l1[4]:
-        st.markdown(_card_topo("Situação Documental", situacao_cliente.capitalize(),
-                              cor_borda=cor_sit, largura="100%", altura=_H), unsafe_allow_html=True)
-    with _l1[5]:
-        st.markdown(_card_topo("Situação Faturamento", _sit_fat_val, subtitulo=_sit_fat_sub,
-                              cor_borda=_sit_fat_cor, largura="100%", altura=_H),
-                    unsafe_allow_html=True)
-
-    st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
-    # Linha 2: saldo em aberto (na moeda estrangeira + em R$ quando for Mercado Externo),
-    # a vencer, vencido, inadimplência e adiantamento. Linha 3: Total Faturado (e, se o
-    # cliente tiver mais de uma moeda estrangeira, os saldos das demais moedas).
-    _l2 = st.columns(_n)
     _moeda_principal = moedas_estrangeiras[0] if moedas_estrangeiras else None
     _outras_moedas = moedas_estrangeiras[1:]
-    _o = 1 if _moeda_principal else 0
 
     def _saldo_moeda_card(_m):
         _simbolo = _SIMBOLOS_MOEDA.get(_m, _m)
@@ -412,63 +548,99 @@ def render(
         return _card_num(f"Total em Aberto {_simbolo}", f"{_simbolo} {_formatar_numero(_saldo)}",
                          cor_borda="#4A7FB5", largura="100%", altura=_H)
 
-    if _moeda_principal:
-        with _l2[0]:
-            st.markdown(_saldo_moeda_card(_moeda_principal), unsafe_allow_html=True)
-    with _l2[_o]:
-        st.markdown(_card_num("Total em Aberto R$" if _moeda_principal else "Total em Aberto",
-                              _formatar_moeda(total_em_aberto),
-                              cor_borda="#6366f1", largura="100%", altura=_H), unsafe_allow_html=True)
-    with _l2[1 + _o]:
-        st.markdown(_card_num("Total a Vencer", _formatar_moeda(total_a_vencer),
-                              cor_borda="#22c55e", largura="100%", altura=_H), unsafe_allow_html=True)
-    with _l2[2 + _o]:
-        st.markdown(_card_num("Total Vencido", _formatar_moeda(total_vencido),
-                              cor_borda="#E24B4A", largura="100%", altura=_H), unsafe_allow_html=True)
-    with _l2[3 + _o]:
-        st.markdown(_card_num("% Inadimplência", f"{pct_inadimplencia:.2f}%".replace(".", ","),
-                              cor_borda=cor_inadimplencia, largura="100%", altura=_H), unsafe_allow_html=True)
-    with _l2[4 + _o]:
-        with st.container(key="fcg_adto_wrap"):
-            st.markdown(_card_num(
-                "<span style='display:inline-block;padding-right:24px;box-sizing:border-box;'>"
-                "Adiantamento em Aberto</span>",
-                valor_adto_card, cor_borda="#2ECC71", largura="100%", altura=_H), unsafe_allow_html=True)
-            st.markdown(
-                f"<style>div[class*='st-key-fcg_adto_wrap'] {{ position:relative !important; }}"
-                f"div[class*='st-key-{chave_btn_adto}'] {{"
-                f" position:absolute !important; top:10px !important; right:10px !important;"
-                f" margin:0 !important; width:28px !important; max-width:28px !important; z-index:10; }}"
-                f"div[class*='st-key-{chave_btn_adto}'] button {{"
-                f" width:28px; height:28px; padding:0; min-height:0; border-radius:6px;"
-                f" background-color:#1E88E5; border-color:#1E88E5; color:#ffffff; }}"
-                f"div[class*='st-key-{chave_btn_adto}'] button:hover {{"
-                f" background-color:#1669B3; border-color:#1669B3; color:#ffffff; }}"
-                "div[class*='st-key-fcg_fat_wrap'] { position:relative !important; }"
-                "div[class*='st-key-fcg_fat_modo'] { position:absolute !important; top:8px !important;"
-                " right:14px !important; z-index:10; margin:0 !important; gap:6px !important; }"
-                "div[class*='st-key-fcg_fat_modo'] { width:96px !important; }"
-                "div[class*='st-key-fcg_fat_modo'] button { min-height:28px !important; padding:2px 8px !important; }"
-                "div[class*='st-key-fcg_fat_modo'] button p { font-size:12px !important; }</style>",
-                unsafe_allow_html=True,
-            )
-            if st.button("", icon=":material/refresh:", key=chave_btn_adto,
-                         help="Carregar adiantamento", disabled=carregar_adiantamento is None):
-                _aviso_adto.info("⏳ Consultando adiantamento...")
-                df_adto = carregar_adiantamento()
-                _aviso_adto.empty()
-                mapa_adto = _adiantamento_recebido_por_agente(df_adto)
-                st.session_state[chave_adto] = float(sum(mapa_adto.get(c, 0.0) for c in codigos_str))
-                st.rerun()
+    # Os cards seguem três grupos, cada um começando em uma linha nova, com no máximo 4 por linha (a última linha de cada
+    # grupo é a que tem menos cards; cada card ocupa a largura da sua coluna, então o valor não corta):
+    #   1) limite de crédito · 2) títulos em aberto (financeiro) · 3) situação e adiantamento / perfil de pagamento.
+    _ADTO = object()   # no lugar do card de adiantamento, que leva o botão de atualizar por cima
+    _grupo_limite = [
+        _card_num("Limite Total", _formatar_moeda(limite_total),
+                  cor_borda="#6366f1", largura="100%", altura=_H),
+        _card_num("Limite Consumido NF + PV", _formatar_moeda(consumido_nf + consumido_pv),
+                  cor_borda="#E24B4A", largura="100%", altura=_H),
+        _card_num("Limite Disponível", _formatar_moeda(limite_disponivel),
+                  cor_borda=cor_disp, cor_fundo=cor_fundo_disp, largura="100%", altura=_H),
+        _card_num("% Limite Utilizado", f"{pct_utilizado:.2f}%".replace(".", ","),
+                  cor_borda=cor_disp, cor_fundo=cor_fundo_disp, largura="100%", altura=_H),
+    ]
+    # Saldo em aberto (na moeda estrangeira + em R$ quando for Mercado Externo), a vencer, vencido e inadimplência.
+    _grupo_financeiro = ([_saldo_moeda_card(_moeda_principal)] if _moeda_principal else []) + [
+        _card_num("Total em Aberto R$" if _moeda_principal else "Total em Aberto", _formatar_moeda(total_em_aberto),
+                  cor_borda="#6366f1", largura="100%", altura=_H),
+        _card_num("Total a Vencer", _formatar_moeda(total_a_vencer),
+                  cor_borda="#22c55e", largura="100%", altura=_H),
+        _card_num("Total Vencido", _formatar_moeda(total_vencido),
+                  cor_borda="#E24B4A", largura="100%", altura=_H),
+        _card_num("% Inadimplência", f"{pct_inadimplencia:.2f}%".replace(".", ","),
+                  cor_borda=cor_inadimplencia, largura="100%", altura=_H),
+    ]
+    _grupo_situacao = [
+        _card_topo("Situação Documental", situacao_cliente.capitalize(),
+                   cor_borda=cor_sit, largura="100%", altura=_H),
+        _card_topo("Situação Faturamento", _sit_fat_val, subtitulo=_sit_fat_sub,
+                   cor_borda=_sit_fat_cor, largura="100%", altura=_H),
+    ] + ([_card_perfil_pagamento(df_hist, _H)] if _com_historico else []) + [_ADTO]   # Adiantamento por último: só carrega ao clicar
+
+    _tam_linhas, _cards_fcg = [], []
+    # Cliente só do Mercado Externo: sem o card de perfil são 12 cards, que fecham 3 linhas de 4 (grade única, sem buracos).
+    _grupos_cards = ((_grupo_limite + _grupo_financeiro + _grupo_situacao,) if _so_me
+                     else (_grupo_limite, _grupo_financeiro, _grupo_situacao))
+    for _grupo in _grupos_cards:
+        _nl = -(-len(_grupo) // 4)
+        _b, _e = divmod(len(_grupo), _nl)
+        _tam_linhas += [_b + (1 if k < _e else 0) for k in range(_nl)]
+        _cards_fcg += _grupo
+    _pos = 0
+    for _n_linha, _tam in enumerate(_tam_linhas):
+        if _n_linha:
+            st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+        _cols = st.columns(max(_tam_linhas))
+        for _k in range(_tam):
+            with _cols[_k]:
+                _card = _cards_fcg[_pos]
+                if _card is _ADTO:
+                    with st.container(key="fcg_adto_wrap"):
+                        st.markdown(_card_num(
+                            "<span style='display:inline-block;padding-right:24px;box-sizing:border-box;'>"
+                            "Adiantamento em Aberto</span>",
+                            valor_adto_card, cor_borda="#2ECC71", largura="100%", altura=_H), unsafe_allow_html=True)
+                        st.markdown(
+                            f"<style>div[class*='st-key-fcg_adto_wrap'] {{ position:relative !important; }}"
+                            f"div[class*='st-key-{chave_btn_adto}'] {{"
+                            f" position:absolute !important; top:10px !important; right:10px !important;"
+                            f" margin:0 !important; width:28px !important; max-width:28px !important; z-index:10; }}"
+                            f"div[class*='st-key-{chave_btn_adto}'] button {{"
+                            f" width:28px; height:28px; padding:0; min-height:0; border-radius:6px;"
+                            f" background-color:#1E88E5; border-color:#1E88E5; color:#ffffff; }}"
+                            f"div[class*='st-key-{chave_btn_adto}'] button:hover {{"
+                            f" background-color:#1669B3; border-color:#1669B3; color:#ffffff; }}"
+                            "div[class*='st-key-fcg_fat_wrap'] { position:relative !important; }"
+                            "div[class*='st-key-fcg_fat_modo'] { position:absolute !important; top:8px !important;"
+                            " right:14px !important; z-index:10; margin:0 !important; gap:6px !important; }"
+                            "div[class*='st-key-fcg_fat_modo'] { width:96px !important; }"
+                            "div[class*='st-key-fcg_fat_modo'] button { min-height:28px !important; padding:2px 8px !important; }"
+                            "div[class*='st-key-fcg_fat_modo'] button p { font-size:12px !important; }</style>",
+                            unsafe_allow_html=True,
+                        )
+                        if st.button("", icon=":material/refresh:", key=chave_btn_adto,
+                                     help="Carregar adiantamento", disabled=carregar_adiantamento is None):
+                            _aviso_adto.info("⏳ Consultando adiantamento...")
+                            df_adto = carregar_adiantamento()
+                            _aviso_adto.empty()
+                            mapa_adto = _adiantamento_recebido_por_agente(df_adto)
+                            st.session_state[chave_adto] = float(sum(mapa_adto.get(c, 0.0) for c in codigos_str))
+                            st.rerun()
+                else:
+                    st.markdown(_card, unsafe_allow_html=True)
+            _pos += 1
 
     # Linha 3: demais moedas estrangeiras (se houver), depois o Total Faturado em faixa de
     # largura total (gráfico por ano, altura de um card).
     if _outras_moedas:
-        st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
         for _col, _m in zip(st.columns(max(_n, len(_outras_moedas))), _outras_moedas):
             with _col:
                 st.markdown(_saldo_moeda_card(_m), unsafe_allow_html=True)
-    st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
     meses = dados_faturamento_mes(df_fat_mensal, codigos_selecionados)
     if por_ano:
         # O botão Por ano | Por mês fica dentro da faixa (canto superior direito): o contêiner é
@@ -559,7 +731,7 @@ def render(
     )
 
     # ── Clientes do grupo (PV/NF/Total — consumo do limite de crédito) ───────
-    # Mesmo dado do antigo relatório de Grupo de Crédito: um cliente por
+    # Mesmo dado do antigo relatório "Grupo de Crédito - Demo": um cliente por
     # linha, PV + NF = Total consumido do limite. Só existe (e só faz sentido) no
     # modo Grupo, exportado no Excel — não muda o que a tela já mostra.
     clientes_pv_nf = []
@@ -642,14 +814,26 @@ def render(
     # tabela do Grupo de Crédito, só no modo Grupo.
     if eh_grupo and not df_pv_nf_tela.empty:
         st.markdown("<div style='margin-top:-0.5rem'></div>", unsafe_allow_html=True)
-        with st.expander(f"Clientes do grupo — consumo do limite de crédito", expanded=True):
+        with st.expander(f"Clientes do grupo — consumo do limite de crédito", expanded=False):
             st.caption("PV, NF e Total = consumido do limite de crédito (R$)")
             render_tabela_html(df_pv_nf_tela)
 
     st.divider()
 
-    # ── Tabela de títulos em aberto + Excel ──────────────────────────────────
-    st.subheader("Títulos em Aberto")
+    # ── Títulos em aberto / histórico de pagamentos + Excel ──────────────────
+    # Uma seção só, "Histórico de pagamentos" (todo o histórico, pagas e em aberto, sem seletor
+    # de período), para todos que acessam o painel.
+    if _com_historico:
+        st.markdown(
+            '<h3 style="margin:0 0 2px 0">Histórico de pagamentos</h3>', unsafe_allow_html=True)
+        st.caption("Pagamento comparado ao crédito esperado (vencimento + 1 dia útil, sem fins de semana e feriados), só baixas do banco.")
+        _resumo_pagador(df_hist, None)   # histórico completo
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    elif _hist_me:
+        st.markdown('<h3 style="margin:0 0 2px 0">Histórico de pagamentos</h3>', unsafe_allow_html=True)
+        _corpo_historico(df_hist_me, nomes_agente, eh_grupo, titulo_escolhido, None)
+    else:
+        st.subheader("Títulos em Aberto")
     if not df_cr_sel.empty:
         df_cr_sel = calcular_dias_prazo(df_cr_sel)
     colunas_tabela = {
@@ -668,7 +852,8 @@ def render(
     }
 
     if df_cr_sel.empty:
-        st.success("Nenhum título em aberto.")
+        if not _com_historico and not _hist_me:
+            st.success("Nenhum título em aberto.")
         df_tela = pd.DataFrame()
     else:
         colunas_existentes = [c for c in colunas_tabela_tela if c in df_cr_sel.columns]
@@ -683,11 +868,14 @@ def render(
         if "COTACAO" in df_tela.columns:
             df_tela["COTACAO"] = df_tela["COTACAO"].apply(lambda v: _formatar_numero(v, 4))
         df_tela = df_tela.rename(columns=colunas_tabela_tela)
-        render_tabela_html(
-            df_tela,
-            coluna_situacao="Situação Vencto.",
-            colunas_moeda=["Saldo em Aberto"],
-        )
+        if not _com_historico and not _hist_me:
+            render_tabela_html(
+                df_tela,
+                coluna_situacao="Situação Vencto.",
+                colunas_moeda=["Saldo em Aberto"],
+            )
+    if _com_historico:
+        _corpo_historico(df_hist, nomes_agente, eh_grupo, titulo_escolhido, None)
 
     kpis = [
         ("Limite Total", limite_total, "moeda"),
@@ -734,6 +922,37 @@ def render(
         clientes_pv_nf=clientes_pv_nf if eh_grupo else None,
         nota_rodape=_nota_repr,
     )
+    # A mesma planilha ganha o perfil de pagamento (no Resumo) e a aba de títulos pagos.
+    if _com_historico and not df_hist.empty:
+        _r_all = pagador.resumir(df_hist, None)
+        _faixas = pagador.faixas(df_hist, None)
+        _perfil_linhas = [
+            ("Perfil", _r_all["perfil"], "texto"),
+            ("% do valor pago no prazo", round(_r_all["pct_prazo"], 2), "numero"),
+            ("Atraso médio ponderado (dias)", round(_r_all["atraso_medio"], 2), "numero"),
+            ("Pior atraso (dias)", int(_r_all["pior_atraso"]), "numero"),
+            ("Parcelas pagas", int(_r_all["parcelas"]), "numero"),
+            ("Parcelas com mais de 15 dias de atraso", int(_r_all["acima_15"]), "numero"),
+            ("Valor pago", round(_r_all["valor"], 2), "numero"),
+        ] + [(f"Parcelas: {rot}", int(q), "numero") for rot, q in _faixas]
+        # Uma aba só, "Histórico de Pagamentos": todas as parcelas (pagas e ainda em aberto), da prorrogação mais recente para a mais antiga.
+        _pagos = df_hist.sort_values(["PRORROGADO", "DOC", "PARC"], ascending=[False, False, True])
+        _df_pagos = pd.DataFrame({
+            "Cliente": _pagos["AGN"].astype(int).astype(str).map(lambda c: f"{nomes_agente.get(c, c)} - {c}").values,
+            "NF": _pagos["DOC"].values, "Parcela": _pagos["PARC"].values,
+            "Emissão da nota": _pagos["EMISSAO"].values, "Vencimento": _pagos["VENCTO"].values,
+            "Prorrogado": _pagos["PRORROGADO"].values, "Crédito esperado": _pagos["CREDITO_ESPERADO"].values,
+            "Data do pagamento": _pagos["DT_ULT_PAG"].values, "Valor da parcela": _pagos["VALOR_PARCELA"].values,
+            "Valor pago": _pagos["VALOR_PAGO"].values, "Saldo em aberto": _pagos["SALDO"].values,
+            "Dias de atraso": _pagos["DIAS_ATRASO"].values, "Classificação": _pagos["CLASSIFICACAO"].values,
+        })
+        if not eh_grupo:
+            _df_pagos = _df_pagos.drop(columns=["Cliente"])
+        arquivo_excel = adicionar_perfil_e_titulos_pagos(
+            arquivo_excel, _perfil_linhas, _df_pagos,
+            colunas_moeda=("Valor da parcela", "Valor pago", "Saldo em aberto"),
+            colunas_data=("Emissão da nota", "Vencimento", "Prorrogado", "Crédito esperado", "Data do pagamento"),
+            nome_aba="Histórico de Pagamentos", remover_abas=("Títulos em Aberto",))
 
     # Imagem: os MESMOS cards e gráficos da tela (12 cards em 2 linhas de 6 + painéis).
     _cor_disp_rgb = _rgb(cor_disp)
@@ -886,3 +1105,5 @@ def render(
         imagem={"data": imagem_png, "file_name": f"Faturamento_{titulo_escolhido}.png".replace(" ", "_").replace("/", "-"), "key": "fcg_export_imagem"},
         copiar={"data": imagem_png, "key": "fcg_copiar"},
     )
+
+

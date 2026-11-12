@@ -834,7 +834,7 @@ def gerar_imagem_painel_externo(
     y += altura_cards
 
     if cotacoes:
-        draw.text((MARGEM, y + 4), "Cotação PTAX com variação vs D-2", font=fonte_sub, fill=_COR_MUTED)
+        draw.text((MARGEM, y + 4), "Cotação PTAX com variação vs dia anterior", font=fonte_sub, fill=_COR_MUTED)
         y += 26
         for i, c in enumerate(cotacoes):
             x0 = MARGEM + i * (largura_card + GAP)
@@ -1210,14 +1210,6 @@ def gerar_imagem_situacao_cliente(
     )
 
 
-
-
-
-
-# ── Texto copiável (para colar direto no corpo do e-mail) ─────────────────────
-
-
-
 def gerar_imagem_inconsistencias(
     df: pd.DataFrame,
     titulo: str = "Inconsistências de Lançamentos",
@@ -1333,6 +1325,122 @@ def gerar_imagem_inconsistencias(
     img.save(buf, format="PNG")
     return buf.getvalue()
 
+
+def gerar_imagem_grupos_credito(
+    df: pd.DataFrame,
+    titulo: str = "Grupos de Crédito",
+) -> bytes:
+    """PNG (fundo branco) com cabeçalho + tabela do relatório de grupos de crédito.
+
+    Espera df com colunas já formatadas como strings:
+    Cód. | Grupo | Limite | Disponível | % Util. | Consumido NF | Consumido PV |
+    Documentação | Faturamento
+    """
+    colunas_label = list(df.columns)
+
+    LARGURA, MARGEM = 1500, 24
+    largura_util    = LARGURA - 2 * MARGEM
+    _f              = _FATOR_QUALIDADE
+
+    fonte_titulo = _carregar_fonte(18, negrito=True)
+    fonte_sub    = _carregar_fonte(11)
+    fonte_th     = _carregar_fonte(11, negrito=True)
+    fonte_td     = _carregar_fonte(11)
+
+    ALTURA_CAB   = 30 + 18 + 18 + 4
+    ALTURA_TH    = 28
+    ALTURA_LIN   = 22
+    n            = len(df)
+    altura_total = MARGEM + ALTURA_CAB + ALTURA_TH + n * ALTURA_LIN + MARGEM
+
+    img  = Image.new("RGB", (round(LARGURA * _f), round(altura_total * _f)), "white")
+    draw = _DrawEscalado(ImageDraw.Draw(img), _f)
+
+    y = MARGEM
+    draw.text((MARGEM, y), _sanitizar_linha(titulo), font=fonte_titulo, fill=_COR_TEXTO)
+    y += 30
+    draw.text((MARGEM, y), f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}", font=fonte_sub, fill=_COR_MUTED)
+    y += 18
+    draw.line([(MARGEM, y), (LARGURA - MARGEM, y)], fill=(12, 68, 123), width=2)
+    y += 22
+
+    pesos_gc = {
+        "Cód.": 0.6, "Grupo": 3.0, "Limite": 1.4, "Disponível": 1.4,
+        "% Util.": 0.8, "Consumido NF": 1.4, "Consumido PV": 1.4,
+        "Documentação": 1.2, "Faturamento": 1.1,
+        "Mercado": 0.7,
+    }
+    pesos = [pesos_gc.get(c, 1.0) for c in colunas_label]
+    soma  = sum(pesos) or 1.0
+    largs = [largura_util * p / soma for p in pesos]
+    xs    = [MARGEM + sum(largs[:i]) for i in range(len(largs))]
+
+    draw.rectangle([MARGEM, y, LARGURA - MARGEM, y + ALTURA_TH],
+                   outline=_COR_BORDA_TAB, fill=_COR_FUNDO_CARD)
+    for i, col in enumerate(colunas_label):
+        draw.text((xs[i] + 6, y + 7),
+                  _truncar_texto(draw, col, fonte_th, largs[i] - 12),
+                  font=fonte_th, fill=_COR_MUTED)
+    y += ALTURA_TH
+
+    _COR_LIBERADO  = (34, 197, 94)
+    _COR_BLOQUEADO = (226, 75, 74)
+
+    _COLUNAS_MOEDA_GC = {"Limite", "Disponível", "Consumido NF", "Consumido PV"}
+
+    for _, row in df.iterrows():
+        fat = str(row.get("Faturamento",  "")).upper()
+        doc = str(row.get("Documentação", "")).upper()
+        for i, col in enumerate(colunas_label):
+            raw = row.get(col, "-")
+            if col in _COLUNAS_MOEDA_GC:
+                try:
+                    val = f"{float(raw):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                except (TypeError, ValueError):
+                    val = _valor_celula(raw)
+            else:
+                val = _valor_celula(raw)
+            cor = _COR_TEXTO
+            if col == "Faturamento":
+                cor = _COR_BLOQUEADO if "BLOQUEADO" in fat else _COR_LIBERADO
+            elif col == "Documentação":
+                cor = _COR_BLOQUEADO if "BLOQ" in doc else _COR_LIBERADO
+            txt = _truncar_texto(draw, val, fonte_td, largs[i] - 12)
+            draw.text((xs[i] + 6, y + 4), txt, font=fonte_td, fill=cor)
+        y += ALTURA_LIN
+        draw.line([(MARGEM, y), (LARGURA - MARGEM, y)], fill=_COR_LINHA_TAB, width=1)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ── Texto copiável (para colar direto no corpo do e-mail) ─────────────────────
+
+def gerar_texto_resumo_titulos(
+    titulo_principal: str,
+    cards_resumo: list,
+    df_titulos: pd.DataFrame,
+    titulo_tabela: str = "Títulos",
+) -> str:
+    """Monta uma versão em texto simples (não-imagem) do mesmo resumo,
+    pronta para colar no corpo de um e-mail. Colunas separadas por ' | '."""
+    linhas = [titulo_principal, f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}", ""]
+
+    for card in cards_resumo:
+        linhas.append(f"{card['label']}: {card['valor']}")
+    linhas.append("")
+
+    linhas.append(titulo_tabela)
+    if not df_titulos.empty:
+        colunas = list(df_titulos.columns)
+        linhas.append(" | ".join(colunas))
+        for _, row in df_titulos.iterrows():
+            linhas.append(" | ".join(str(row.get(c, "-")) for c in colunas))
+    else:
+        linhas.append("(nenhum registro)")
+
+    return "\n".join(linhas)
 
 
 def render_botao_copiar_imagem(imagem_bytes: bytes, label: str = "Copiar", key: str = "copiar_img") -> None:

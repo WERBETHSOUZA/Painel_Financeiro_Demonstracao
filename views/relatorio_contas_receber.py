@@ -67,7 +67,6 @@ _COLUNAS_EXCEL = {
     "DESC_APLIC_FIN":    "Desc. Aplic. Financeiro",
     "PERC_APLIC_FIN":    "% Aplic. Financeiro",
     "ACRESCIMOS":        "Acréscimos",
-    "DEVOLUCAO":         "Devolução",
     "SALDO_EM_ABERTO":   "Saldo em Aberto",
     "MOEDA":             "Moeda",
     "VLR_PARCELA_MOEDA": "Valor da Parcela (Moeda)",
@@ -94,7 +93,7 @@ _COLUNAS_PERCENTUAL = ("% Regra", "% Aplic. NF", "% Aplic. Financeiro")
 # genéricos do exportador (aqui os nomes têm acento/espaço próprios do relatório).
 _COLUNAS_MOEDA = (
     "Valor Faturado", "Desc. Aplic. NF", "Líquido Financeiro", "Desc. Aplic. Financeiro",
-    "Acréscimos", "Devolução", "Saldo em Aberto", "Valor da Parcela (Moeda)",
+    "Acréscimos", "Saldo em Aberto", "Valor da Parcela (Moeda)",
     "Saldo em Aberto (Moeda)",
 )
 
@@ -154,7 +153,6 @@ def render(df_cr: pd.DataFrame, df_grupo_agentes: pd.DataFrame = None, df_grupo_
 
     # ── Filtros (opcionais) na barra lateral ─────────────────────────────────
     with st.sidebar:
-        st.write("---")
         st.caption("Contas a Receber - Exportação")
         entrada = st.date_input(
             "Entrada (opcional)", value=(), format="DD/MM/YYYY", key="rcr_entrada",
@@ -295,4 +293,4 @@ def render(df_cr: pd.DataFrame, df_grupo_agentes: pd.DataFrame = None, df_grupo_
         colunas_verde_vermelho=("Dias Vencto.",),
         colunas_situacao_sem_fundo=("Situação Vencto.",),
     )
-    botao_exportar_excel(arquivo_excel, "Contas_a_Receber.xlsx", key="rcr_export")
+    botao_exportar_excel(arquivo_excel, "Contas_a_Receber_Exportacao.xlsx", key="rcr_export")

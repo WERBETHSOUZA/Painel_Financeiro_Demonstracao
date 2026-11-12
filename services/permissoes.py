@@ -16,6 +16,9 @@ Formato:
       }
     }
 Quem está em mais de um grupo recebe a soma dos acessos; quem não está em nenhum grupo não acessa nada.
+
+"desativados" (opcional, só o administrador padrão edita) lista painéis e relatórios desligados para TODOS, inclusive
+administradores: a chave é o título do relatório ou "Painel > Subpainel". O que não está na lista fica ativo.
 """
 
 import json
@@ -50,6 +53,18 @@ _SUBSTITUIDOS = {
 }
 
 
+# Relatórios renomeados: quem tinha o título antigo (liberado em grupo ou desativado) passa a ter o novo.
+_RELATORIOS_RENOMEADOS = {
+    "💵 Recebimentos": "💵 Recebimento por Banco",
+    "💵 Recebimentos Bancos": "💵 Recebimento por Banco",
+    "📄 Descontos Realizados MI": "📄 Descontos Realizados",
+}
+
+
+def _migrar_relatorios(relatorios) -> list:
+    return [_RELATORIOS_RENOMEADOS.get(str(r), str(r)) for r in relatorios]
+
+
 def _migrar_paineis(paineis) -> list:
     saida = []
     for p in paineis:
@@ -61,13 +76,13 @@ def _grupo(v) -> dict:
     v = v or {}
     return {
         "paineis": _migrar_paineis(v.get("paineis", [])),
-        "relatorios": [str(r) for r in v.get("relatorios", [])],
+        "relatorios": _migrar_relatorios(v.get("relatorios", [])),
         "membros": sorted({normalizar_usuario(m) for m in v.get("membros", []) if normalizar_usuario(m)}),
     }
 
 
 def _vazio() -> dict:
-    return {"versao": 2, "grupos": {GRUPO_ADMIN: _grupo(None)}}
+    return {"versao": 2, "grupos": {GRUPO_ADMIN: _grupo(None)}, "desativados": []}
 
 
 def carregar(arquivo: Path = ARQUIVO) -> dict:
@@ -82,6 +97,7 @@ def carregar(arquivo: Path = ARQUIVO) -> dict:
         dados["grupos"][str(nome)] = _grupo(v)
     dados["grupos"][GRUPO_ADMIN]["paineis"] = []
     dados["grupos"][GRUPO_ADMIN]["relatorios"] = []
+    dados["desativados"] = sorted(set(_migrar_relatorios(bruto.get("desativados") or [])))
     return dados
 
 
@@ -108,6 +124,7 @@ def salvar(dados: dict, quem: str, arquivo: Path = ARQUIVO) -> None:
         "atualizado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "atualizado_por": quem,
         "grupos": grupos,
+        "desativados": sorted({str(x) for x in dados.get("desativados", [])}),
     }
     tmp = arquivo.with_suffix(".tmp")
     tmp.write_text(json.dumps(saida, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -158,6 +175,34 @@ def filtrar_menu(estrutura: list, perm) -> list:
                 saida.append((icone, nome, liberados))
         else:
             subs = [(i, s) for i, s in conteudo if f"{nome} > {s}" in perm["paineis"]]
+            if subs:
+                saida.append((icone, nome, subs))
+    return saida
+
+
+def desativados(dados: dict | None = None) -> set:
+    """Chaves (título do relatório ou "Painel > Subpainel") desativadas para todos os usuários."""
+    dados = dados if dados is not None else carregar()
+    return {str(x) for x in dados.get("desativados", [])}
+
+
+def remover_desativados(estrutura: list, desligados) -> list:
+    """Tira da estrutura do menu (mesmo formato de PAINEIS_ADMIN) os itens desativados, para todos os usuários.
+    Painéis que ficam sem nenhum item somem do menu."""
+    if not desligados:
+        return list(estrutura)
+    saida = []
+    for item in estrutura:
+        if len(item) != 3:
+            saida.append(item)
+            continue
+        icone, nome, conteudo = item
+        if isinstance(conteudo, dict):
+            restantes = {k: v for k, v in conteudo.items() if k not in desligados}
+            if restantes:
+                saida.append((icone, nome, restantes))
+        else:
+            subs = [(i, s) for i, s in conteudo if f"{nome} > {s}" not in desligados]
             if subs:
                 saida.append((icone, nome, subs))
     return saida

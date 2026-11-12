@@ -22,6 +22,9 @@ informação real.
 | **Mercado Interno** | Títulos em reais: inadimplência, aging, saldo por banco, recebimentos e ranking de clientes. |
 | **Mercado Externo** | Títulos em US$, € e £, com **PTAX** do Banco Central, **valor atualizado e variação cambial** (card total com participação por moeda), impacto cambial por moeda, **país** de cada cliente e painel de **containers em aberto** (por cliente e por país). |
 | **Faturamento por UF** (Mercado Interno) | Mapa do Brasil por UF, colorido pela métrica escolhida (**faturado** em violeta, **em aberto** em verde, **inadimplência** em vermelho e **variação**) e pelo período (o ano atual, com meses fechados, ou qualquer ano fechado desde 2019). Ao clicar em um estado, o card de detalhe passa a mostrar a métrica escolhida primeiro, além do top 8 e dos **maiores clientes** (lista com rolagem); clicar de novo volta ao Brasil. Abaixo do mapa, o card **Total Faturado** (por ano e por mês) segue o estado escolhido. Lista de clientes com o faturamento do ano anterior e do atual, e Excel. |
+| **Contas a Receber MI: Recebimentos e Resumo** | Card **A receber \| Recebido** (o que entrou no banco por mês e por data), visão **Resumo** com recebido por mês, comparação com o ano anterior, **PMR** (prazo médio de recebimento), giro da carteira, quadro por banco ao passar o mouse e Excel com resumos. |
+| **Visão Geral Comercial** (Mercado Interno) | Faturamento por **mês, semana ou dia**, comparação com o ano anterior, top vendedores e planilha de notas vendidas. |
+| **Recebimentos por Banco** | Tudo que foi baixado no banco, por período, organização e banco, com Excel. |
 | **Inconsistências** | Lançamentos com erro, com resumo por categoria, tabela de uma linha por lançamento, Excel e imagem. |
 | **Grupo de Crédito** | Limite, consumo e situação por grupo econômico e por cliente do grupo. |
 
@@ -32,9 +35,10 @@ Cada tela exporta **Excel** e gera uma **imagem pronta para e-mail** com os mesm
 - **Login simulado:** a demonstração abre em uma tela de login com o logo **BI-FINANCEIRO**
   (usuário `admin`, senha `admin`, sem autenticação real).
 - **Tela inicial:** depois do login aparece "Olá, Administrador!" e nenhuma aba aberta; o painel é escolhido no menu.
-- **Menu lateral:** logo, nome do usuário, tempo restante de acesso (contagem regressiva) e o botão **Sair**,
-  seguidos do menu **Relatórios** e dos grupos **Financeiro** (Visão Geral MI-ME, Mercado Interno, Mercado Externo
-  e Inconsistências) e **Comercial** (Grupo de Crédito, Situação Cliente, Faturamento Cliente/Grupo e Faturamento por UF).
+- **Menu lateral:** logo, usuário, frase do dia e o botão **Sair**, seguidos do menu **Relatórios** e dos grupos
+  **Financeiro** (Visão Geral, Mercado Interno com os botões **Painel | Resumo**, Mercado Externo e Inconsistências),
+  **Tesouraria** (Recebimentos por Banco) e **Comercial** (Visão Geral Comercial, Limite Grupo de Crédito, Situação do Cliente,
+  Faturamento por Cliente ou Grupo e Faturamento por Estado).
 - **Acessos (botão Admin):** ao lado do **Sair**. Mostra como o painel real controla quem vê o quê: **grupos** com membros
   e painéis/relatórios liberados (um interruptor "Todos" por painel). Quem está em mais de um grupo recebe a soma e
   quem não está em nenhum não acessa nada. Na demonstração os usuários e grupos são fictícios e a busca de usuários usa uma
@@ -75,16 +79,34 @@ No Windows, dê dois cliques em **`ABRIR DEMO.bat`**. O navegador abre em `http:
 ## Estrutura
 
 ```
-app_demo.py          # login, menu lateral e navegação da demonstração
+app_demo.py          # abre a demonstração: semeia os grupos fictícios e executa o app.py
+app.py               # o MESMO painel do projeto real (login, menu, navegação), copiado e com nomes genéricos
 dados_ficticios.py   # gera os dados inventados (clientes, títulos, grupos, faturado)
-dados_ficticios_extra.py  # dados fictícios dos relatórios (contas a pagar, aprovações, boletos DDA, inconsistências)
-services/            # permissões por grupo (config/permissoes.json) e diretório de usuários fictício
-views/               # telas e relatórios
+dados_ficticios_extra.py  # dados fictícios dos relatórios (contas a pagar, boletos DDA, inconsistências)
+dados_ficticios_novos.py  # dados fictícios dos recebimentos, vendas, adiantamentos, descontos, fretes e aprovação
+services/            # data_service.py devolve os dados inventados (mesmas funções e colunas do painel real);
+                     # auth_service.py é o login de demonstração; permissões por grupo e diretório de usuários fictício
+views/               # telas e relatórios (copiados do projeto real)
 components/          # cards e botões reutilizáveis
-assets/              # estilos (inclui as animações em CSS)
+assets/              # estilos (inclui as animações em CSS) e logo fictício
 utils/               # imagem para e-mail, exportação Excel, formatação, PTAX
+tools/               # sincronizar_com_projeto_real.py: atualiza a demonstração a partir do projeto real
 query/               # exemplos de consultas SQL (nomes genéricos, schema DOMINIO)
 ```
+
+## Como atualizar a demonstração
+
+A demo roda o mesmo código do painel real; só a camada de dados (`services/data_service.py`) e o login
+(`services/auth_service.py`) são da demonstração. Para acompanhar mudanças do painel real:
+
+```bash
+python tools/sincronizar_com_projeto_real.py
+```
+
+O script copia as telas, componentes e utilitários do projeto real, troca os nomes da empresa por nomes genéricos, tira do
+menu o que não existe na demo (extratos e saldos bancários, que dependem de acesso direto ao banco) e no fim confere se sobrou
+algum nome real nos arquivos. Se o painel real ganhar uma consulta nova, crie a função de mesmo nome em
+`services/data_service.py` devolvendo um DataFrame com as mesmas colunas (o gerador fica em `dados_ficticios_novos.py`).
 
 ## Consultas de exemplo
 

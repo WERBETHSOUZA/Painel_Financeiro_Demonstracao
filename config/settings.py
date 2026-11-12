@@ -4,7 +4,7 @@ from pathlib import Path
 
 def aplicar_configuracoes():
     st.set_page_config(
-        page_title="Painel Financeiro | Demonstração",
+        page_title="Painel Financeiro | Demo",
         layout="wide",
         page_icon="💰",
         initial_sidebar_state="expanded"

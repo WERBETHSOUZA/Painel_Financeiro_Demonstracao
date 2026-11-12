@@ -29,23 +29,23 @@ def render(df: pd.DataFrame) -> None:
         return
 
     dados = df.copy()
-    dados["DT_VENCIMENTO"] = pd.to_datetime(
-        dados["DT_VENCIMENTO"], errors="coerce"
+    dados["BOL_DT_VENCIMENTO"] = pd.to_datetime(
+        dados["BOL_DT_VENCIMENTO"], errors="coerce"
     )
-    dados["VALOR"] = pd.to_numeric(dados["VALOR"], errors="coerce").fillna(0)
-    dados = dados.dropna(subset=["DT_VENCIMENTO"])
+    dados["BOL_RE_VALOR"] = pd.to_numeric(dados["BOL_RE_VALOR"], errors="coerce").fillna(0)
+    dados = dados.dropna(subset=["BOL_DT_VENCIMENTO"])
 
     if dados.empty:
         st.warning("Os boletos não possuem datas de vencimento válidas.")
         return
 
-    dados["MES_VENCIMENTO"] = dados["DT_VENCIMENTO"].dt.to_period("M").astype(str)
-    dados["STATUS"] = dados["DT_VENCIMENTO"].dt.date.map(
+    dados["MES_VENCIMENTO"] = dados["BOL_DT_VENCIMENTO"].dt.to_period("M").astype(str)
+    dados["STATUS"] = dados["BOL_DT_VENCIMENTO"].dt.date.map(
         lambda vencimento: "Vencido" if vencimento < date.today() else "Em dia"
     )
 
-    data_inicial_padrao = dados["DT_VENCIMENTO"].min().date()
-    data_final_padrao = dados["DT_VENCIMENTO"].max().date()
+    data_inicial_padrao = dados["BOL_DT_VENCIMENTO"].min().date()
+    data_final_padrao = dados["BOL_DT_VENCIMENTO"].max().date()
 
     with st.sidebar:
         st.markdown("#### Filtros — Boletos DDA")
@@ -78,7 +78,7 @@ def render(df: pd.DataFrame) -> None:
             default=["Em dia", "Vencido"],
             key="dda_status",
         )
-        sacados = sorted(dados["SACADO"].dropna().astype(str).unique().tolist())
+        sacados = sorted(dados["BOL_ST_SACADO"].dropna().astype(str).unique().tolist())
         sacados_selecionados = st.multiselect(
             "Sacado",
             options=sacados,
@@ -90,14 +90,14 @@ def render(df: pd.DataFrame) -> None:
         return
 
     filtrado = dados[
-        (dados["DT_VENCIMENTO"].dt.date >= data_inicial)
-        & (dados["DT_VENCIMENTO"].dt.date <= data_final)
-        & (dados["VALOR"] >= valor_minimo)
+        (dados["BOL_DT_VENCIMENTO"].dt.date >= data_inicial)
+        & (dados["BOL_DT_VENCIMENTO"].dt.date <= data_final)
+        & (dados["BOL_RE_VALOR"] >= valor_minimo)
         & (dados["STATUS"].isin(status))
     ].copy()
 
     if sacados_selecionados:
-        filtrado = filtrado[filtrado["SACADO"].astype(str).isin(sacados_selecionados)]
+        filtrado = filtrado[filtrado["BOL_ST_SACADO"].astype(str).isin(sacados_selecionados)]
 
     if filtrado.empty:
         st.warning("Nenhum boleto corresponde aos filtros selecionados.")
@@ -105,19 +105,19 @@ def render(df: pd.DataFrame) -> None:
 
     with st.container(horizontal=True):
         st.metric("Total de boletos", f"{len(filtrado):,}".replace(",", "."), border=True)
-        st.metric("Valor total", _formatar_reais(filtrado["VALOR"].sum()), border=True)
-        st.metric("Valor médio", _formatar_reais(filtrado["VALOR"].mean()), border=True)
+        st.metric("Valor total", _formatar_reais(filtrado["BOL_RE_VALOR"].sum()), border=True)
+        st.metric("Valor médio", _formatar_reais(filtrado["BOL_RE_VALOR"].mean()), border=True)
         st.metric("Vencidos", int((filtrado["STATUS"] == "Vencido").sum()), border=True)
 
     grafico_mes, grafico_status = st.columns(2)
 
-    mensal = filtrado.groupby("MES_VENCIMENTO", as_index=False)["VALOR"].sum()
+    mensal = filtrado.groupby("MES_VENCIMENTO", as_index=False)["BOL_RE_VALOR"].sum()
     figura_mensal = px.bar(
         mensal,
         x="MES_VENCIMENTO",
-        y="VALOR",
+        y="BOL_RE_VALOR",
         title="Valor por mês de vencimento",
-        labels={"MES_VENCIMENTO": "Mês", "VALOR": "Valor total"},
+        labels={"MES_VENCIMENTO": "Mês", "BOL_RE_VALOR": "Valor total"},
     )
     grafico_mes.plotly_chart(figura_mensal, width="stretch")
 
@@ -133,53 +133,53 @@ def render(df: pd.DataFrame) -> None:
 
     st.subheader("Top 10 sacados por maior valor")
     ranking = (
-        filtrado.groupby("SACADO", as_index=False)["VALOR"]
+        filtrado.groupby("BOL_ST_SACADO", as_index=False)["BOL_RE_VALOR"]
         .sum()
-        .sort_values("VALOR", ascending=False)
+        .sort_values("BOL_RE_VALOR", ascending=False)
         .head(10)
-        .rename(columns={"SACADO": "Sacado", "VALOR": "Valor total"})
+        .rename(columns={"BOL_ST_SACADO": "Sacado", "BOL_RE_VALOR": "Valor total"})
     )
     ranking["Valor total"] = ranking["Valor total"].apply(_formatar_reais)
     render_tabela_html(ranking, colunas_moeda=["Valor total"])
 
     st.subheader("Detalhes dos boletos")
     colunas = [
-        "NOSSO_NUMERO",
-        "SACADO",
-        "CNPJ",
-        "DT_VENCIMENTO",
-        "VALOR",
+        "BOL_ST_NOSSONUMERO",
+        "BOL_ST_SACADO",
+        "BOL_ST_CNPJ",
+        "BOL_DT_VENCIMENTO",
+        "BOL_RE_VALOR",
         "STATUS",
-        "NUM_TITULO",
-        "DOCUMENTO",
-        "MOTIVO",
+        "BOL_ST_NUMTITULO",
+        "BOL_ST_DOCUMENTO",
+        "BOL_ST_MOTIVO",
     ]
-    detalhes = filtrado[colunas].sort_values("DT_VENCIMENTO")
+    detalhes = filtrado[colunas].sort_values("BOL_DT_VENCIMENTO")
     nomes_excel = {
-        "NOSSO_NUMERO": "Nosso Número",
-        "SACADO": "Sacado",
-        "CNPJ": "CNPJ",
-        "DT_VENCIMENTO": "Vencimento",
-        "VALOR": "Valor",
+        "BOL_ST_NOSSONUMERO": "Nosso Número",
+        "BOL_ST_SACADO": "Sacado",
+        "BOL_ST_CNPJ": "CNPJ",
+        "BOL_DT_VENCIMENTO": "Vencimento",
+        "BOL_RE_VALOR": "Valor",
         "STATUS": "Status",
-        "NUM_TITULO": "Número do Título",
-        "DOCUMENTO": "Documento",
-        "MOTIVO": "Motivo",
+        "BOL_ST_NUMTITULO": "Número do Título",
+        "BOL_ST_DOCUMENTO": "Documento",
+        "BOL_ST_MOTIVO": "Motivo",
     }
     df_excel = detalhes.rename(columns=nomes_excel)
     df_excel["Vencimento"] = df_excel["Vencimento"].dt.strftime("%d/%m/%Y")
     _det = detalhes.copy()
-    _det["DT_VENCIMENTO"] = pd.to_datetime(_det["DT_VENCIMENTO"], errors="coerce").dt.strftime("%d/%m/%Y")
-    _det["VALOR"] = _det["VALOR"].apply(_formatar_reais)
+    _det["BOL_DT_VENCIMENTO"] = pd.to_datetime(_det["BOL_DT_VENCIMENTO"], errors="coerce").dt.strftime("%d/%m/%Y")
+    _det["BOL_RE_VALOR"] = _det["BOL_RE_VALOR"].apply(_formatar_reais)
     render_tabela_html(
         _det,
         colunas_renomear={
-            "NOSSO_NUMERO": "Nosso Número", "SACADO": "Sacado",
-            "CNPJ": "CNPJ", "DT_VENCIMENTO": "Vencimento",
-            "VALOR": "Valor", "STATUS": "Status",
-            "NUM_TITULO": "Número do Título", "DOCUMENTO": "Documento",
-            "MOTIVO": "Motivo",
+            "BOL_ST_NOSSONUMERO": "Nosso Número", "BOL_ST_SACADO": "Sacado",
+            "BOL_ST_CNPJ": "CNPJ", "BOL_DT_VENCIMENTO": "Vencimento",
+            "BOL_RE_VALOR": "Valor", "STATUS": "Status",
+            "BOL_ST_NUMTITULO": "Número do Título", "BOL_ST_DOCUMENTO": "Documento",
+            "BOL_ST_MOTIVO": "Motivo",
         },
-        colunas_moeda=["VALOR"],
+        colunas_moeda=["BOL_RE_VALOR"],
     )
     botao_exportar_excel(exportar_excel(df_excel, "BOLETOS_DDA"), "Boletos_DDA.xlsx", key="dda_export_excel")

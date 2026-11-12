@@ -48,8 +48,10 @@ def exportar_excel(df: pd.DataFrame, nome_aba: str = "RELATORIO", colunas_situac
                    colunas_sempre_verde: tuple = (),
                    colunas_sempre_vermelho: tuple = (),
                    colunas_cor_por_situacao: tuple = (),
-                   colunas_situacao_sem_fundo: tuple = ()) -> bytes:
+                   colunas_situacao_sem_fundo: tuple = (),
+                   titulo_planilha: str = "") -> bytes:
     # colunas_valor_abs: exibe sem sinal (▼ só pela cor) mas mantém valor real para coloração condicional
+    # titulo_planilha: se informado, vai na linha 1 (a tabela desce 2 linhas, com filtro, congelamento e cores ajustados)
     """Serializa um DataFrame em bytes no formato .xlsx, com o cabeçalho
     estilizado (fundo azul escuro, texto branco em negrito), largura de
     coluna ajustada ao conteúdo, a primeira linha congelada e colunas
@@ -247,6 +249,18 @@ def exportar_excel(df: pd.DataFrame, nome_aba: str = "RELATORIO", colunas_situac
                 planilha.conditional_formatting.add(
                     _fx, _FR2(formula=[f'EXACT({_l}2,"A VENCER")'],
                               fill=_sem, font=Font(color="00B050", bold=True)))
+                planilha.conditional_formatting.add(
+                    _fx, _FR2(formula=[f'EXACT({_l}2,"PDD")'],
+                              fill=_sem, font=Font(color="7030A0", bold=True)))
+                planilha.conditional_formatting.add(
+                    _fx, _FR2(formula=[f'EXACT({_l}2,"PAGO")'],
+                              fill=_sem, font=Font(color="0070C0", bold=True)))
+                planilha.conditional_formatting.add(
+                    _fx, _FR2(formula=[f'EXACT({_l}2,"BAIXADO")'],
+                              fill=_sem, font=Font(color="0070C0", bold=True)))
+                planilha.conditional_formatting.add(
+                    _fx, _FR2(formula=[f'EXACT({_l}2,"NO PRAZO")'],
+                              fill=_sem, font=Font(color="00B050", bold=True)))
 
         # ── Filtro (autofiltro) no cabeçalho e bordas finas em todas as células ──
         ultima_coluna = get_column_letter(len(df.columns))
@@ -279,7 +293,37 @@ def exportar_excel(df: pd.DataFrame, nome_aba: str = "RELATORIO", colunas_situac
         # ── Congela a primeira linha (cabeçalho) ────────────────────────────
         planilha.freeze_panes = "A2"
 
+        if titulo_planilha:
+            _inserir_titulo(planilha, titulo_planilha)
+
     return output.getvalue()
+
+
+def _inserir_titulo(planilha, titulo: str, linhas: int = 2) -> None:
+    """Põe um título na linha 1 e desce a tabela `linhas` linhas, levando junto o filtro, o congelamento e as
+    regras de cor (intervalos e referências a células, como E2, são deslocados)."""
+    import re
+    from openpyxl.formatting.formatting import ConditionalFormattingList
+
+    def _desloca(texto: str) -> str:
+        return re.sub(r"\b([A-Z]{1,3})(\d+)\b", lambda m: f"{m.group(1)}{int(m.group(2)) + linhas}", texto)
+
+    novas = ConditionalFormattingList()
+    for cf in planilha.conditional_formatting:
+        faixa = _desloca(str(cf.sqref))
+        for regra in cf.rules:
+            if regra.formula:
+                regra.formula = [_desloca(f) for f in regra.formula]
+            novas.add(faixa, regra)
+    planilha.conditional_formatting = novas
+
+    ref_filtro = planilha.auto_filter.ref
+    planilha.insert_rows(1, linhas)
+    if ref_filtro:
+        planilha.auto_filter.ref = _desloca(ref_filtro)
+    planilha.freeze_panes = f"A{linhas + 2}"
+    planilha["A1"] = titulo
+    planilha["A1"].font = Font(bold=True, size=13)
 
 
 # ── Grupos de Crédito: exportação customizada ────────────────────────────────
@@ -485,7 +529,7 @@ _LARGURAS_CAP = {
     "VENCTO": 12, "PRORROGADO": 12, "FORMA_PAGTO": 27, "PIX": 12,
     "LINHA_DIGITAVEL": 50, "COMPLEMENTO": 20, "ACAO": 56, "RATEIO_CLASSES": 53,
     "RATEIO_CENTRO_CUSTO": 49, "RATEIO_PROJETO": 38, "CATEGORIA_ERRO": 18,
-    "SOLICITANTE": 18, "STATUS_ANEXO": 15, "QTD_ANEXOS": 13, "NOME_ANEXO": 59,
+    "SOLICITANTE": 18, "STATUS_ANEXO": 15, "QTD_ANEXOS": 13, "ANX_ST_NOME": 59,
 }
 _CENTRALIZAR_CAP = {"PARC", "DIAS", "QTD_ANEXOS"}
 _COLUNAS_MOEDA_CAP = {"VALOR", "SALDO"}
@@ -805,6 +849,262 @@ def exportar_excel_faturamento_cliente_grupo(
     return output.getvalue()
 
 
+def adicionar_perfil_e_titulos_pagos(xlsx_bytes: bytes, perfil_linhas: list, df_pagos: pd.DataFrame,
+                                     colunas_moeda: tuple = (), colunas_data: tuple = (),
+                                     nome_aba: str = "Títulos Pagos", remover_abas: tuple = ()) -> bytes:
+    """Acrescenta ao Excel do Faturamento - Cliente/Grupo o bloco "Perfil de pagamento" no fim da aba "Resumo" e a aba
+    `nome_aba` (padrão "Títulos Pagos"); `remover_abas` tira abas que a nova substitui. `perfil_linhas` é uma lista de (rótulo, valor, tipo) com tipo "texto", "moeda", "percentual" ou "numero";
+    `df_pagos` traz uma linha por parcela paga."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(xlsx_bytes))
+    ws = wb["Resumo"]
+    fonte_header = Font(color="FFFFFF", bold=True)
+    fundo_header = PatternFill(start_color="1F3864", end_color="1F3864", fill_type="solid")
+
+    linha = ws.max_row + 2
+    ws.cell(row=linha, column=1, value="Perfil de pagamento (todo o histórico)").font = Font(bold=True, size=12)
+    for j, texto in enumerate(("Indicador", "Valor"), start=1):
+        c = ws.cell(row=linha + 1, column=j, value=texto)
+        c.font, c.fill = fonte_header, fundo_header
+    for i, (rotulo, valor, tipo) in enumerate(perfil_linhas, start=linha + 2):
+        ws.cell(row=i, column=1, value=rotulo)
+        c = ws.cell(row=i, column=2, value=valor)
+        c.alignment = Alignment(horizontal="right")
+        if tipo == "moeda":
+            c.number_format = "#,##0.00"
+        elif tipo == "percentual":
+            c.number_format = "0.00%"
+        elif tipo == "numero":
+            c.number_format = "General"
+    ws.column_dimensions["A"].width = max(ws.column_dimensions["A"].width or 0, 40)
+
+    for aba in remover_abas:
+        if aba in wb.sheetnames:
+            del wb[aba]
+    ws2 = wb.create_sheet(nome_aba)
+    if df_pagos is None or df_pagos.empty:
+        ws2["A1"] = "Nenhuma parcela no histórico."
+    else:
+        df = df_pagos.where(df_pagos.notna(), None)
+        for j, col in enumerate(df.columns, start=1):
+            c = ws2.cell(row=1, column=j, value=col)
+            c.font, c.fill = fonte_header, fundo_header
+        for i, row in enumerate(df.itertuples(index=False), start=2):
+            for j, val in enumerate(row, start=1):
+                if hasattr(val, "to_pydatetime"):
+                    val = val.to_pydatetime()
+                ws2.cell(row=i, column=j, value=val)
+        ultima = len(df) + 1
+        ws2.auto_filter.ref = f"A1:{get_column_letter(len(df.columns))}{ultima}"
+        for j, col in enumerate(df.columns, start=1):
+            letra = get_column_letter(j)
+            if col in colunas_moeda:
+                for r in range(2, ultima + 1):
+                    ws2[f"{letra}{r}"].number_format = _FORMATO_CONTABIL
+            elif col in colunas_data:
+                for r in range(2, ultima + 1):
+                    ws2[f"{letra}{r}"].number_format = "dd/mm/yyyy"
+            maior = df[col].map(lambda v: len(str(v)) if v is not None else 0).max()
+            ws2.column_dimensions[letra].width = min(max(len(str(col)), maior) + 2, 45)
+        ws2.freeze_panes = "A2"
+    saida = BytesIO()
+    wb.save(saida)
+    return saida.getvalue()
+
+
+def _nome_curto_org(nome: str, limite: int) -> str:
+    """Nome curto da organização para título de aba/coluna: primeira palavra (duas se for longa, como TRANSPORTADORA
+    FILIAL), sem caracteres que o Excel não aceita em aba."""
+    palavras = str(nome).split(" - ")[0].split()
+    curto = palavras[0] if palavras else ""
+    if len(curto) >= 12 and len(palavras) > 1:
+        curto += " " + palavras[1]
+    for ch in '[]:*?/\\':
+        curto = curto.replace(ch, "")
+    return curto[:limite].strip() or "Org"
+
+
+def adicionar_aba_resumo_recebimentos(xlsx_bytes: bytes, df: pd.DataFrame, titulo: str, organizacoes: str | None = None) -> bytes:
+    """Acrescenta, como primeira aba, o "Resumo" do relatório Recebimento por Banco no mesmo estilo do Excel de
+    faturamento (sem linhas de grade, cabeçalho azul): resumo geral e valores por dia e por banco.
+    `df` traz as colunas "Data Baixa", "Banco" e "Valor Baixa" (uma linha por baixa), e "Organização" quando há mais
+    de uma organização: aí o resumo por banco vem separado por organização e o recebido por dia ganha uma coluna por
+    organização (sem abrir por banco; o detalhe está na aba BAIXAS)."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(xlsx_bytes))
+    ws = wb.create_sheet("Resumo", 0)
+    wb.active = 0
+    ws.sheet_view.showGridLines = False
+
+    fonte_header = Font(color="FFFFFF", bold=True)
+    fundo_header = PatternFill(start_color="1F3864", end_color="1F3864", fill_type="solid")
+    fundo_total = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+    fonte_secao = Font(bold=True, size=12)
+    dias = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+
+    multi = "Organização" in df.columns and df["Organização"].nunique() > 1
+    orgs = (
+        list(df.groupby("Organização")["Valor Baixa"].sum().sort_values(ascending=False).index) if multi else []
+    )
+
+    def cabecalho(planilha, linha, col, textos, alinhamentos=None):
+        for j, texto in enumerate(textos):
+            cel = planilha.cell(row=linha, column=col + j, value=texto)
+            cel.font, cel.fill = fonte_header, fundo_header
+            cel.alignment = Alignment(
+                horizontal=(alinhamentos[j] if alinhamentos else "left" if j == 0 else "right"),
+                wrap_text=True, vertical="center",
+            )
+
+    def linha_total(planilha, linha, col, n_colunas):
+        for j in range(n_colunas):
+            cel = planilha.cell(row=linha, column=col + j)
+            cel.font, cel.fill = Font(bold=True), fundo_total
+
+    def bloco_banco(planilha, linha, d, titulo_bloco, rotulo_total):
+        """Resumo por banco (Cód. Banco / Banco / Baixas / Valor), do que mais recebeu para o que menos recebeu, com a
+        linha de total. Devolve a próxima linha livre."""
+        chaves = ["Cód_Banco", "Banco"] if "Cód_Banco" in d.columns else ["Banco"]
+        resumo_banco = d.groupby(chaves)["Valor Baixa"].agg(["count", "sum"]).sort_values("sum", ascending=False)
+        planilha.cell(row=linha, column=1, value=titulo_bloco).font = fonte_secao
+        linha += 1
+        cabecalho(planilha, linha, 1, ["Cód. Banco", "Banco", "Baixas", "Valor"], ["left", "left", "right", "right"])
+        for chave, linha_dado in resumo_banco.iterrows():
+            linha += 1
+            cod, nome = chave if len(chaves) == 2 else (None, chave)
+            cel_cod = planilha.cell(row=linha, column=1, value=cod)
+            cel_cod.number_format = "General"
+            cel_cod.alignment = Alignment(horizontal="left")
+            planilha.cell(row=linha, column=2, value=str(nome))
+            planilha.cell(row=linha, column=3, value=int(linha_dado["count"]))
+            planilha.cell(row=linha, column=4, value=round(float(linha_dado["sum"]), 2)).number_format = _FORMATO_CONTABIL
+        linha += 1
+        planilha.cell(row=linha, column=1, value=rotulo_total)
+        planilha.cell(row=linha, column=3, value=int(resumo_banco["count"].sum()))
+        planilha.cell(row=linha, column=4, value=round(float(resumo_banco["sum"].sum()), 2)).number_format = _FORMATO_CONTABIL
+        linha_total(planilha, linha, 1, 4)
+        return linha + 2
+
+    def tabela_dia_banco(planilha, d, col, linha_titulo, titulo_tabela):
+        """Valores por dia e por banco: uma coluna por banco, do que mais recebeu para o que menos recebeu."""
+        planilha.cell(row=linha_titulo, column=col, value=titulo_tabela).font = fonte_secao
+        bancos = list(d.groupby("Banco")["Valor Baixa"].sum().sort_values(ascending=False).index)
+        cabecalhos = ["Data", "Dia", "Baixas", "Valor"] + bancos
+        cab_linha = linha_titulo + 1
+        cabecalho(planilha, cab_linha, col, cabecalhos,
+                  ["left", "center"] + ["right"] * (len(cabecalhos) - 2))
+        planilha.row_dimensions[cab_linha].height = 30
+        datas = pd.to_datetime(d["Data Baixa"]).dt.normalize()
+        linha = cab_linha + 1
+        for dia, grupo in d.assign(_dia=datas).groupby("_dia"):
+            planilha.cell(row=linha, column=col, value=dia.to_pydatetime()).number_format = "dd/mm/yyyy"
+            planilha.cell(row=linha, column=col + 1, value=dias[dia.weekday()]).alignment = Alignment(horizontal="center")
+            planilha.cell(row=linha, column=col + 2, value=int(len(grupo)))
+            planilha.cell(row=linha, column=col + 3, value=round(float(grupo["Valor Baixa"].sum()), 2)).number_format = _FORMATO_CONTABIL
+            for k, banco in enumerate(bancos):
+                planilha.cell(row=linha, column=col + 4 + k,
+                              value=round(float(grupo.loc[grupo["Banco"] == banco, "Valor Baixa"].sum()), 2)
+                              ).number_format = _FORMATO_CONTABIL
+            linha += 1
+        planilha.cell(row=linha, column=col, value="Total")
+        planilha.cell(row=linha, column=col + 2, value=int(len(d)))
+        planilha.cell(row=linha, column=col + 3, value=round(float(d["Valor Baixa"].sum()), 2)).number_format = _FORMATO_CONTABIL
+        for k, banco in enumerate(bancos):
+            planilha.cell(row=linha, column=col + 4 + k,
+                          value=round(float(d.loc[d["Banco"] == banco, "Valor Baixa"].sum()), 2)).number_format = _FORMATO_CONTABIL
+        linha_total(planilha, linha, col, len(cabecalhos))
+        for i, largura in enumerate((12, 6, 9, 18)):
+            planilha.column_dimensions[get_column_letter(col + i)].width = largura
+        for k in range(len(bancos)):
+            planilha.column_dimensions[get_column_letter(col + 4 + k)].width = 24
+
+    ws["A1"] = titulo
+    ws["A1"].font = Font(bold=True, size=14)
+    ws["A2"] = f"Gerado em {datetime.now():%d/%m/%Y %H:%M}"
+    ws["A2"].font = Font(size=9, color="808080")
+    if organizacoes:
+        ws["A3"] = f"Organização: {organizacoes}"
+        ws["A3"].font = Font(size=9, color="808080")
+
+    LINHA_TITULO = 4
+    ws[f"A{LINHA_TITULO}"] = "Resumo geral"
+    ws[f"A{LINHA_TITULO}"].font = fonte_secao
+    cab = LINHA_TITULO + 1
+    cabecalho(ws, cab, 1, ["Indicador", "", "", "Valor"], ["left", "left", "right", "right"])
+    indicadores = [
+        ("Total recebido", round(float(df["Valor Baixa"].sum()), 2), _FORMATO_CONTABIL),
+        ("Qtd. baixas", int(len(df)), "0"),
+        ("Bancos", int(df["Banco"].nunique()), "0"),
+    ]
+    if multi:
+        indicadores.append(("Organizações", len(orgs), "0"))
+    for i, (rotulo, valor, formato) in enumerate(indicadores, start=cab + 1):
+        ws.cell(row=i, column=1, value=rotulo)
+        cel = ws.cell(row=i, column=4, value=valor)
+        cel.number_format = formato
+        cel.alignment = Alignment(horizontal="right")
+
+    linha_banco = cab + len(indicadores) + 3
+    larguras_banco = [len(str(b)) for b in df["Banco"].dropna().unique()]
+    if multi:
+        for org in orgs:
+            linha_banco = bloco_banco(ws, linha_banco, df[df["Organização"] == org],
+                                      f"Resumo por banco - {_nome_curto_org(org, 40)}", f"Total {_nome_curto_org(org, 30)}")
+        ws.cell(row=linha_banco - 1, column=1, value="Total geral")
+        ws.cell(row=linha_banco - 1, column=3, value=int(len(df)))
+        ws.cell(row=linha_banco - 1, column=4, value=round(float(df["Valor Baixa"].sum()), 2)).number_format = _FORMATO_CONTABIL
+        linha_total(ws, linha_banco - 1, 1, 4)
+    else:
+        bloco_banco(ws, linha_banco, df, "Resumo por banco", "Total")
+
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = max(20, min(60, (max(larguras_banco) if larguras_banco else 8) + 2))
+    ws.column_dimensions["C"].width = 10
+    ws.column_dimensions["D"].width = 18
+    ws.column_dimensions["E"].width = 3
+
+    COL = 6
+    if not multi:
+        tabela_dia_banco(ws, df, COL, LINHA_TITULO, "Recebido por dia e por banco")
+    else:
+        # Recebido por dia: uma coluna por organização, sem abrir por banco
+        ws.cell(row=LINHA_TITULO, column=COL, value="Recebido por dia").font = fonte_secao
+        nomes_col = [_nome_curto_org(o, 24) for o in orgs]
+        cabecalho(ws, cab, COL, ["Data", "Dia", "Baixas"] + nomes_col + ["Total"],
+                  ["left", "center"] + ["right"] * (len(orgs) + 2))
+        ws.row_dimensions[cab].height = 30
+        datas = pd.to_datetime(df["Data Baixa"]).dt.normalize()
+        linha = cab + 1
+        for dia, grupo in df.assign(_dia=datas).groupby("_dia"):
+            ws.cell(row=linha, column=COL, value=dia.to_pydatetime()).number_format = "dd/mm/yyyy"
+            ws.cell(row=linha, column=COL + 1, value=dias[dia.weekday()]).alignment = Alignment(horizontal="center")
+            ws.cell(row=linha, column=COL + 2, value=int(len(grupo)))
+            for k, org in enumerate(orgs):
+                ws.cell(row=linha, column=COL + 3 + k,
+                        value=round(float(grupo.loc[grupo["Organização"] == org, "Valor Baixa"].sum()), 2)
+                        ).number_format = _FORMATO_CONTABIL
+            ws.cell(row=linha, column=COL + 3 + len(orgs), value=round(float(grupo["Valor Baixa"].sum()), 2)
+                    ).number_format = _FORMATO_CONTABIL
+            linha += 1
+        ws.cell(row=linha, column=COL, value="Total")
+        ws.cell(row=linha, column=COL + 2, value=int(len(df)))
+        for k, org in enumerate(orgs):
+            ws.cell(row=linha, column=COL + 3 + k,
+                    value=round(float(df.loc[df["Organização"] == org, "Valor Baixa"].sum()), 2)).number_format = _FORMATO_CONTABIL
+        ws.cell(row=linha, column=COL + 3 + len(orgs), value=round(float(df["Valor Baixa"].sum()), 2)).number_format = _FORMATO_CONTABIL
+        linha_total(ws, linha, COL, 4 + len(orgs))
+        for i, largura in enumerate((12, 6, 9)):
+            ws.column_dimensions[get_column_letter(COL + i)].width = largura
+        for k in range(len(orgs) + 1):
+            ws.column_dimensions[get_column_letter(COL + 3 + k)].width = 22
+
+    saida = BytesIO()
+    wb.save(saida)
+    return saida.getvalue()
+
+
 # ── Aba PTAX: cotações de compra, venda e variação das moedas, mês anterior e vigente ──
 _DIAS_SEMANA_PTAX = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
 _MOEDAS_PTAX = ("EUR", "GBP", "USD")
@@ -879,6 +1179,94 @@ def adicionar_aba_ptax(xlsx_bytes: bytes, linhas: list[dict], desde, nome_aba: s
         ws.column_dimensions[get_column_letter(c0 + 3)].width = 2
     ws.freeze_panes = "C3"
 
+    saida = BytesIO()
+    wb.save(saida)
+    return saida.getvalue()
+
+
+def exportar_excel_abas_recebimentos(abas: list[dict]) -> bytes:
+    """Excel com uma aba por item de `abas` (Recebimentos por Data). Cada aba tem nome, titulo (linha 1) e UMA tabela
+    (df) ou vários `blocos` empilhados (resumos). Opções da tabela/bloco: moeda, verde (valor em verde/negrito), centro,
+    percentual (0,00%), situacao (coluna com "Em dia"/"Em atraso": verde/vermelho em negrito, sem fundo) e
+    total_na_ultima (última linha é o total, em negrito). Cabeçalho azul-marinho, zebra, e, nas abas de uma tabela,
+    filtro e congelamento, como nos demais relatórios. Datas saem como dd/mm/aaaa."""
+    from copy import copy
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+    fonte_header = Font(color="FFFFFF", bold=True)
+    fundo_header = PatternFill(start_color="1F3864", end_color="1F3864", fill_type="solid")
+    zebra = PatternFill(start_color="EEF4FB", end_color="EEF4FB", fill_type="solid")
+    larguras: dict = {}
+
+    def _tabela(ws, df, linha_cab: int, op: dict) -> int:
+        """Escreve a tabela com o cabeçalho em `linha_cab`; devolve a última linha usada."""
+        df = df.astype(object).where(df.notna(), None)
+        for j, col in enumerate(df.columns, start=1):
+            c = ws.cell(row=linha_cab, column=j, value=col)
+            c.font, c.fill = fonte_header, fundo_header
+            c.alignment = Alignment(vertical="center")
+        for i, row in enumerate(df.itertuples(index=False), start=linha_cab + 1):
+            for j, val in enumerate(row, start=1):
+                if hasattr(val, "to_pydatetime"):
+                    val = val.to_pydatetime()
+                c = ws.cell(row=i, column=j, value=val)
+                if (i - linha_cab - 1) % 2 == 1:
+                    c.fill = zebra
+                if hasattr(val, "year"):
+                    c.number_format = "dd/mm/yyyy"
+                    c.alignment = Alignment(horizontal="center")
+        ultima = linha_cab + len(df)
+        for j, col in enumerate(df.columns, start=1):
+            letra = get_column_letter(j)
+            for r in range(linha_cab + 1, ultima + 1):
+                cel = ws[f"{letra}{r}"]
+                if col in op.get("moeda", ()):
+                    cel.number_format = _FORMATO_CONTABIL
+                if col in op.get("percentual", ()):
+                    cel.number_format = "0.00%"
+                if col in op.get("verde", ()):
+                    cel.font = Font(bold=True, color="00B050")
+                if col in op.get("centro", ()):
+                    cel.alignment = Alignment(horizontal="center")
+                if col == op.get("situacao") and cel.value in ("Em dia", "Em atraso"):
+                    cel.font = Font(bold=True, color="00B050" if cel.value == "Em dia" else "FF0000")
+            tem_data = df[col].map(lambda v: hasattr(v, "year")).any()
+            maior = max((len(str(v)) for v in df[col] if v is not None and not hasattr(v, "year")), default=0)
+            larguras[(ws.title, letra)] = max(larguras.get((ws.title, letra), 0),
+                                              min(max(len(str(col)), maior, 10 if tem_data else 0) + 2, 45))
+        if op.get("total_na_ultima"):
+            for c in ws[ultima]:
+                f = copy(c.font)
+                f.b = True
+                c.font = f
+                c.border = Border(top=Side(style="thin"))
+        return ultima
+
+    for aba in abas:
+        ws = wb.create_sheet(aba["nome"])
+        ws["A1"] = aba["titulo"]
+        ws["A1"].font = Font(bold=True, size=13, color="1F3864")
+        if "blocos" in aba:                              # aba de resumos: tabelas empilhadas
+            linha = 3
+            for bloco in aba["blocos"]:
+                ws.cell(row=linha, column=1, value=bloco["titulo"]).font = Font(bold=True, size=12, color="1F3864")
+                if bloco["df"] is None or bloco["df"].empty:
+                    ws.cell(row=linha + 1, column=1, value="Nenhum registro.")
+                    linha += 4
+                    continue
+                linha = _tabela(ws, bloco["df"], linha + 1, bloco) + 3
+        else:
+            df = aba["df"]
+            if df is None or df.empty:
+                ws["A3"] = "Nenhum registro."
+                continue
+            ultima = _tabela(ws, df, 3, aba)
+            ult_filtro = ultima - 1 if aba.get("total_na_ultima") else ultima
+            ws.auto_filter.ref = f"A3:{get_column_letter(len(df.columns))}{ult_filtro}"
+            ws.freeze_panes = "A4"
+    for (aba_nome, letra), w in larguras.items():
+        wb[aba_nome].column_dimensions[letra].width = w
     saida = BytesIO()
     wb.save(saida)
     return saida.getvalue()

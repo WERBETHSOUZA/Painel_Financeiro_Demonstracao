@@ -9,7 +9,9 @@ import time
 
 import streamlit as st
 
-from services import auth_service, permissoes
+from config import pdd
+from services import auth_service, clientes_transferencia, permissoes
+from services.data_service import carregar_lista_clientes
 
 ADMIN = permissoes.GRUPO_ADMIN
 
@@ -94,7 +96,123 @@ def _remover_membro(g, usuario):
     st.session_state[f"acc_mem|{g}"] = [u for u in st.session_state[f"acc_mem|{g}"] if u != usuario]
 
 
-def render(estrutura, cartoes, areas, quem, admins_fixos=()):
+def _alternar_painel(chave):
+    desligados = st.session_state["acc_pn_des"]
+    (desligados.discard if st.session_state[f"acc_pn|{chave}"] else desligados.add)(chave)
+
+
+def _previa_menu(g, catalogo, desativados):
+    """Prévia do menu que o grupo verá, montada do rascunho (o que está marcado agora, mesmo sem salvar). Itens desativados
+    para todos (Painéis) não aparecem; painel sem nenhum item liberado some, como no menu real."""
+    with st.container(border=True, key="acc_pn_prev"):
+        st.markdown("**Prévia do menu**")
+        st.caption("Como o menu fica para este grupo, com o que está marcado agora.")
+        total = 0
+        for nome_painel, campos in catalogo:
+            itens = [rot for _, ch, rot, _ in campos if ch in _sel(g) and ch not in desativados]
+            if not itens:
+                continue
+            total += len(itens)
+            st.markdown(f"📁 **{nome_painel}**")
+            st.markdown("\n".join(f"- {rot}" for rot in itens))
+        if not total:
+            st.caption("Nenhum painel liberado: o grupo vê um menu vazio.")
+        else:
+            st.caption(f"{total} item(ns) no menu.")
+
+
+def _secao_paineis(dados, catalogo, quem):
+    """Painéis ativos/desativados: todos entram marcados; desmarcar desativa para TODOS (inclusive administradores).
+    Só o administrador padrão chega aqui."""
+    salvo = {str(x) for x in dados.get("desativados", [])}
+    if "_acc_pn_init" not in st.session_state:
+        st.session_state["acc_pn_des"] = set(salvo)
+        st.session_state["_acc_pn_init"] = True
+    desligados = st.session_state["acc_pn_des"]
+
+    st.subheader("🔒 Painéis")
+    st.caption(f"{len(desligados)} item(ns) desativado(s)." if desligados else "Nenhum item desativado.")
+    st.caption("Todos entram marcados. Desmarcar um item o desativa: ele some do menu e da página de Relatórios para "
+               "todos, inclusive para você. Para voltar a vê-lo, marque de novo aqui.")
+    for nome_painel, campos in catalogo:
+        ativos = sum(1 for _, ch, _, _ in campos if ch not in desligados)
+        with st.expander(f"{nome_painel}   ·   {ativos}/{len(campos)} ativos", expanded=ativos < len(campos)):
+            area_atual = None
+            for _, chave, rotulo, area in campos:
+                if area and area != area_atual:
+                    st.caption(area)
+                    area_atual = area
+                st.session_state[f"acc_pn|{chave}"] = chave not in desligados
+                st.toggle(rotulo, key=f"acc_pn|{chave}", on_change=_alternar_painel, args=(chave,))
+
+    if desligados != salvo:
+        with st.container(border=True):
+            t, d, s = st.columns([3, 1, 1])
+            t.markdown("**Você tem alterações não salvas**")
+            if d.button("Descartar", key="acc_pn_desc", width="stretch"):
+                st.session_state.pop("_acc_pn_init", None)
+                st.rerun()
+            if s.button("Salvar", key="acc_pn_salvar", type="primary", width="stretch"):
+                dados["desativados"] = sorted(desligados)
+                permissoes.salvar(dados, quem)
+                st.session_state.pop("_acc_pn_init", None)
+                st.session_state["_acessos_msg"] = "Painéis salvos. Os itens desativados saíram do menu de todos."
+                st.rerun()
+
+
+def _secao_transferencia(quem):
+    """Clientes do Mercado Interno que pagam por transferência (todo cliente é boleto por padrão). Só o administrador padrão."""
+    st.subheader("💱 Clientes por Transferência")
+    st.caption("Todo cliente do Mercado Interno é boleto por padrão. Aqui ficam só os que pagam por transferência: eles saem do "
+               "relatório Boleto Não Gerado e ganham a fatia \"Transferência\" em Distribuição por Banco.")
+    lista = clientes_transferencia.carregar()
+
+    df = carregar_lista_clientes()
+    nomes = {}
+    if df is not None and not df.empty:
+        for cod, nome in zip(df["COD_CLIENTE"], df["CLIENTE"]):
+            nomes[str(int(cod))] = f"{nome} - {int(cod)}"
+    opcoes = [c for c in nomes if c not in lista]
+    c1, c2 = st.columns([4, 1], vertical_alignment="bottom")
+    escolha = c1.selectbox("Incluir cliente (busque por nome ou código)", opcoes, index=None,
+                           format_func=lambda c: nomes.get(c, c), placeholder="Digite o nome ou o código do cliente",
+                           key="acc_transf_busca")
+    if c2.button("Incluir", key="acc_transf_incluir", type="primary", width="stretch", disabled=escolha is None):
+        nome_cli = nomes[escolha].rsplit(" - ", 1)[0]
+        clientes_transferencia.incluir(escolha, nome_cli, quem)
+        st.session_state["_acessos_msg"] = f"{nome_cli} incluído em Clientes por Transferência."
+        st.session_state.pop("acc_transf_busca", None)
+        st.rerun()
+
+    st.markdown(f"**{len(lista)} cliente(s)**")
+    if not lista:
+        st.info("Nenhum cliente cadastrado: todos são tratados como boleto.")
+    for cod, info in sorted(lista.items(), key=lambda kv: kv[1].get("nome", "")):
+        a, b, c = st.columns([5, 3, 1], vertical_alignment="center")
+        a.markdown(f"**{info.get('nome') or '—'}**  ·  {cod}")
+        b.caption(f"{info.get('incluido_por', '')} · {info.get('em', '')}")
+        if c.button("✕", key=f"acc_transf_rm|{cod}", help="Remover da lista (volta a ser boleto)"):
+            clientes_transferencia.remover(cod, quem)
+            st.session_state["_acessos_msg"] = f"{info.get('nome') or cod} removido (volta a ser boleto)."
+            st.rerun()
+
+
+def _secao_opcoes(quem):
+    """Opções do relatório (só o administrador padrão). Hoje: ocultar o PDD do Contas a Receber MI."""
+    st.subheader("⚙️ Opções do relatório")
+    atual = pdd.ocultar_pdd()
+    novo = st.toggle(f"Ocultar PDD do Contas a Receber MI (vencido há mais de {pdd.DIAS_PDD} dias)", value=atual,
+                     key="acc_opc_ocultar_pdd")
+    st.caption("Ligado: os títulos PDD saem do Contas a Receber MI inteiro (cards, rosca, aging, tabelas, Excel, relatório e "
+               "Visão Geral Comercial) e o Saldo em Aberto cai pelo mesmo valor. Vale para todos os usuários. "
+               "Desligado: tudo como antes.")
+    if novo != atual:
+        pdd.definir_ocultar_pdd(novo, quem)
+        st.session_state["_acessos_msg"] = "PDD oculto do Contas a Receber MI." if novo else "PDD volta a aparecer no Contas a Receber MI."
+        st.rerun()
+
+
+def render(estrutura, cartoes, areas, quem, admins_fixos=(), admin_padrao=False):
     st.title("🔐 Acessos")
     dados = permissoes.carregar()
     fixos = {permissoes.normalizar_usuario(u) for u in admins_fixos}
@@ -114,6 +232,9 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=()):
         _carregar_rascunho(g, dados, catalogo)
         st.session_state["_acc_init"] = g
 
+    secao_paineis = bool(admin_padrao) and st.session_state.get("_acessos_secao") == "paineis"
+    secao_transf = bool(admin_padrao) and st.session_state.get("_acessos_secao") == "transferencia"
+    secao_opc = bool(admin_padrao) and st.session_state.get("_acessos_secao") == "opcoes"
     c_esq, c_dir = st.columns([1, 3], gap="large")
 
     with c_esq:
@@ -121,8 +242,10 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=()):
         for n in nomes:
             qtd = len(dados["grupos"][n]["membros"])
             if st.button(f"{n}  ·  {qtd}", key=f"acc_g|{n}", width="stretch",
-                         type="primary" if n == g else "secondary"):
+                         type="primary" if n == g and not secao_paineis and not secao_transf and not secao_opc else "secondary"):
                 st.session_state["_acessos_grupo"] = n
+                st.session_state["_acessos_secao"] = None
+                st.session_state.pop("_acc_pn_init", None)
                 st.rerun()
         with st.form("acc_novo_grupo", clear_on_submit=True):
             novo = st.text_input("Novo grupo", placeholder="Ex.: Comercial", label_visibility="collapsed")
@@ -138,8 +261,32 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=()):
                     st.session_state["_acessos_grupo"] = novo
                     st.rerun()
         st.caption("Quem não está em nenhum grupo não acessa nada.")
+        if admin_padrao:
+            st.caption("SOMENTE ADMINISTRADOR PADRÃO")
+            if st.button("🔒 Painéis", key="acc_secao_paineis", width="stretch",
+                         type="primary" if secao_paineis else "secondary"):
+                st.session_state["_acessos_secao"] = "paineis"
+                st.session_state.pop("_acc_pn_init", None)
+                st.rerun()
+            if st.button("💱 Clientes por Transferência", key="acc_secao_transf", width="stretch",
+                         type="primary" if secao_transf else "secondary"):
+                st.session_state["_acessos_secao"] = "transferencia"
+                st.rerun()
+            if st.button("⚙️ Opções do relatório", key="acc_secao_opc", width="stretch",
+                         type="primary" if secao_opc else "secondary"):
+                st.session_state["_acessos_secao"] = "opcoes"
+                st.rerun()
 
     with c_dir:
+        if secao_paineis:
+            _secao_paineis(dados, catalogo, quem)
+            return
+        if secao_transf:
+            _secao_transferencia(quem)
+            return
+        if secao_opc:
+            _secao_opcoes(quem)
+            return
         eh_admin_grupo = g == ADMIN
         rasc = _rascunho(g, catalogo)
         salvo = dados["grupos"][g]
@@ -188,7 +335,7 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=()):
 
         chave_busca = f"acc_busca|{g}"
         termo = st.text_input("Buscar usuário", key=chave_busca, label_visibility="collapsed",
-                              placeholder="Buscar por nome ou login (mín. 3 letras)")
+                              placeholder="Buscar no AD por nome ou login (mín. 3 letras)")
         termo_limpo = termo.strip()
         if len(termo_limpo) >= 3:
             achados = [r for r in _buscar(termo_limpo) if r[0] not in membros]
@@ -199,7 +346,7 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=()):
                 cb.button("Adicionar", key=f"acc_ad|{g}", width="stretch", type="primary",
                           on_click=_adicionar_membro, args=(g, escolhido[0], chave_busca, escolhido[1]))
             else:
-                st.caption("Nenhum usuário novo encontrado para essa busca.")
+                st.caption("Nenhum usuário novo encontrado no AD para essa busca.")
                 manual = permissoes.normalizar_usuario(termo_limpo)
                 if permissoes.usuario_valido(manual) and manual not in membros:
                     st.button(f"Adicionar \"{manual}\" mesmo assim", key=f"acc_man|{g}",
@@ -209,21 +356,32 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=()):
 
         if not eh_admin_grupo:
             st.caption("2 · O QUE O GRUPO PODE VER")
-            for nome_painel, campos in catalogo:
-                chaves = [ch for _, ch, _, _ in campos]
-                n = sum(1 for ch in chaves if ch in _sel(g))
-                chave_painel = f"acc_p|{g}|{nome_painel}"
-                st.session_state[chave_painel] = n == len(chaves)
-                with st.expander(f"{nome_painel}   ·   {n}/{len(chaves)}", expanded=n > 0):
-                    st.toggle("Todos", key=chave_painel,
-                              on_change=_marcar_painel, args=(g, campos, chave_painel))
-                    area_atual = None
-                    for _, chave, rotulo, area in campos:
-                        if area and area != area_atual:
-                            st.caption(area)
-                            area_atual = area
-                        st.session_state[_k(g, chave)] = chave in _sel(g)
-                        st.toggle(rotulo, key=_k(g, chave), on_change=_alternar, args=(g, chave))
+            # Sem quebra de linha nos nomes (toggles, títulos dos painéis e prévia): a coluna da esquerda leva mais largura.
+            st.markdown(
+                "<style>[class*='st-key-acc_pn_tog'] label p, [class*='st-key-acc_pn_tog'] summary p,"
+                "[class*='st-key-acc_pn_prev'] p, [class*='st-key-acc_pn_prev'] li{white-space:nowrap !important}"
+                "[class*='st-key-acc_pn_prev'] li{margin-left:0}</style>",
+                unsafe_allow_html=True,
+            )
+            col_tog, col_prev = st.columns([5, 3], gap="large")
+            with col_tog.container(key="acc_pn_tog"):
+                for nome_painel, campos in catalogo:
+                    chaves = [ch for _, ch, _, _ in campos]
+                    n = sum(1 for ch in chaves if ch in _sel(g))
+                    chave_painel = f"acc_p|{g}|{nome_painel}"
+                    st.session_state[chave_painel] = n == len(chaves)
+                    with st.expander(f"{nome_painel}   ·   {n}/{len(chaves)}", expanded=n > 0):
+                        st.toggle("Todos", key=chave_painel,
+                                  on_change=_marcar_painel, args=(g, campos, chave_painel))
+                        area_atual = None
+                        for _, chave, rotulo, area in campos:
+                            if area and area != area_atual:
+                                st.caption(area)
+                                area_atual = area
+                            st.session_state[_k(g, chave)] = chave in _sel(g)
+                            st.toggle(rotulo, key=_k(g, chave), on_change=_alternar, args=(g, chave))
+            with col_prev:
+                _previa_menu(g, catalogo, {str(x) for x in dados.get("desativados", [])})
 
         if sujo:
             with st.container(border=True):

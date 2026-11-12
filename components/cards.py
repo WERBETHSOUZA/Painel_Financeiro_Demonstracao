@@ -1,7 +1,7 @@
 """
 components/cards.py
 ====================
-Cards HTML reutilizáveis — Painel Financeiro
+Cards HTML reutilizáveis — Demo Painel Financeiro
 Mantém a função original `card()` e os cards animados do Painel de
 Saldo Financeiro, e adiciona um padrão único de card com largura/altura
 configuráveis (`card_html`) + helper de layout (`render_cards_row`),
@@ -11,7 +11,7 @@ usado em todas as telas do painel para manter consistência visual.
 import streamlit as st
 from datetime import date
 
-# ── Paleta de cores ─────────────────────────────────────────────────────────────
+# ── Paleta Demo ─────────────────────────────────────────────────────────────
 C = {
     "teal":    "#1BADA6",
     "azul":    "#4A7FB5",
@@ -38,7 +38,7 @@ def card(label, valor, cor_borda, cor_texto, cor_label, cor_fundo):
     <div style="background:{cor_fundo}; border-left:4px solid {cor_borda};
                 border-radius:8px; padding:16px 20px; margin-bottom:8px;">
         <div style="font-size:13px; color:{cor_label}; margin-bottom:4px;">{label}</div>
-        <div class="cv" style="font-size:26px; font-weight:600; color:{cor_texto}; white-space:nowrap;">{valor}</div>
+        <div style="font-size:26px; font-weight:600; color:{cor_texto}; white-space:nowrap;">{valor}</div>
     </div>
     """
 
@@ -477,7 +477,7 @@ _COMP_DESTAQUE = {"PROTESTADO", "PROTESTO"}
 
 _CSS_TABELA = """
 <style>
-.ibc-tbl-wrap{overflow-x:auto;border-radius:8px;background:#1e1e2e}
+.ibc-tbl-wrap{overflow-x:auto;border-radius:8px;background:#1e1e2e;margin-bottom:14px}
 .ibc-tbl{width:100%;border-collapse:collapse;font-size:13px}
 .ibc-tbl th{color:#8892A4;font-weight:500;font-size:11px;padding:7px 10px;
             text-align:left;border-bottom:1px solid #2a2a3a;white-space:nowrap;
@@ -528,6 +528,8 @@ def _badge_situacao(val) -> str:
         "VENCIDO":  ("rgba(226,75,74,0.15)",   "#E24B4A"),
         "A VENCER": ("rgba(34,197,94,0.15)",    "#22c55e"),
         "PAGO":     ("rgba(99,102,241,0.15)",   "#818cf8"),
+        "BAIXADO":  ("rgba(55,138,221,0.15)",   "#4fa3e0"),
+        "NO PRAZO": ("rgba(34,197,94,0.15)",    "#22c55e"),
     }
     bg, cor = mapa.get(v.upper(), ("rgba(128,128,128,0.15)", "#8892A4"))
     return f'<span class="ibc-badge" style="background:{bg};color:{cor}">{v}</span>'
@@ -552,8 +554,10 @@ def render_tabela_html(
     colunas_valor_destaque: list | None = None,
     colunas_centralizar: list | None = None,
     altura: int = 420,
+    altura_fixa: bool = False,
 ) -> None:
-    """Renderiza um DataFrame como tabela HTML estilizada via st.markdown."""
+    """Renderiza um DataFrame como tabela HTML estilizada via st.markdown.
+    `altura` é o máximo; com `altura_fixa` a tabela ocupa sempre essa altura (para alinhar com blocos vizinhos)."""
     if df is None or df.empty:
         _st.info("Sem dados para exibir.")
         return
@@ -597,7 +601,7 @@ def render_tabela_html(
 
     html = (
         _CSS_TABELA
-        + f'<div class="ibc-tbl-wrap" style="max-height:{altura}px;overflow-y:auto">'
+        + f'<div class="ibc-tbl-wrap" style="{"height" if altura_fixa else "max-height"}:{altura}px;overflow-y:auto">'
         + '<table class="ibc-tbl">'
         + f"<thead><tr>{cabecalho}</tr></thead>"
         + f"<tbody>{linhas_html}</tbody>"

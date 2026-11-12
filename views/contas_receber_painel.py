@@ -20,7 +20,7 @@ from components.buttons import botao_exportar_excel, botoes_acao_row
 from components.cards import card_html, render_cards_row
 from services.data_service import carregar_total_faturado_cliente
 from utils.imagem_email import gerar_imagem_visao_geral
-from views import contas_receber, contas_receber_externo
+from views import contas_receber, contas_receber_externo, resumo_contas_receber_mi
 
 _SIMBOLOS = {"USD": "US$", "EUR": "€", "GBP": "£"}
 _NOMES = {"USD": "Dólar", "EUR": "Euro", "GBP": "Libra"}
@@ -367,64 +367,6 @@ new Chart(document.getElementById('ch'), {{
 
 # ── Visão geral ───────────────────────────────────────────────────────────────
 
-def _pct2(valor: float) -> str:
-    return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + "%"
-
-
-def _ticker_indicadores(df: pd.DataFrame, total_aberto: float) -> None:
-    """Faixa de indicadores que rola sozinha (pausa ao passar o mouse), acima dos cards."""
-    from utils.ptax import buscar_ptax
-
-    vencido = float(df.loc[df["DIAS"] < 0, "SALDO_EM_ABERTO"].sum())
-    a_vencer_7 = float(df.loc[(df["DIAS"] >= 0) & (df["DIAS"] <= 7), "SALDO_EM_ABERTO"].sum())
-    prazo = (pd.to_datetime(df["VENCIMENTO"]) - pd.to_datetime(df["ENTRADA"])).dt.days
-    peso = df["SALDO_EM_ABERTO"]
-    prazo_medio = float((prazo * peso).sum() / peso.sum()) if peso.sum() else 0.0
-    maior = df.groupby("CLIENTE")["SALDO_EM_ABERTO"].sum().sort_values(ascending=False)
-
-    itens = [
-        ("Total em aberto", f"R$ {_abrev(total_aberto)}", ""),
-        ("Vencido", f"R$ {_abrev(vencido)}",
-         f'<span class="dn">{_pct2(vencido / total_aberto * 100)}</span>' if total_aberto and not _oculto() else ""),
-        ("A vencer em 7 dias", f"R$ {_abrev(a_vencer_7)}", ""),
-        ("Prazo médio", f"{prazo_medio:.0f} dias", ""),
-    ]
-    try:
-        ptax = buscar_ptax()
-    except Exception:
-        ptax = {}
-    for moeda, simbolo in (("USD", "US$"), ("EUR", "€")):
-        cot = ptax.get(moeda)
-        if cot:
-            var = cot.get("var_venda")
-            seta = ""
-            if var is not None:
-                seta = (f'<span class="{"up" if var >= 0 else "dn"}">{"▲" if var >= 0 else "▼"} '
-                        f'{_pct2(abs(var))}</span>')
-            itens.append((f"{simbolo} PTAX", f"{cot['venda']:.4f}".replace(".", ","), seta))
-    if len(maior):
-        itens.append(("Maior devedor", str(maior.index[0]).title(), ""))
-    itens.append(("Títulos em aberto", f"{len(df)}", ""))
-
-    faixa = "".join(
-        f'<span class="tk-it"><span class="tk-l">{r}</span><span class="tk-v">{v}</span>{x}</span><span class="tk-sep">•</span>'
-        for r, v, x in itens
-    )
-    st.html(f"""
-<style>
-.tk{{overflow:hidden;white-space:nowrap;border:0.5px solid rgba(128,128,128,.35);border-radius:8px;
-     background:rgba(128,128,128,.08);padding:9px 0;margin-bottom:12px}}
-.tk-tr{{display:inline-block;animation:tk-rola 40s linear infinite}}
-.tk:hover .tk-tr{{animation-play-state:paused}}
-.tk-it{{display:inline-flex;align-items:baseline;gap:6px;margin-right:30px;font-size:13px}}
-.tk-l{{opacity:.7}} .tk-v{{font-weight:600}}
-.tk-sep{{opacity:.4;margin-right:30px}}
-.tk .up{{color:#16a34a}} .tk .dn{{color:#dc2626}}
-@keyframes tk-rola{{from{{transform:translateX(0)}}to{{transform:translateX(-50%)}}}}
-</style>
-<div class="tk"><div class="tk-tr">{faixa}{faixa}</div></div>""")
-
-
 def _visao_geral(df: pd.DataFrame) -> None:
     for col in ("SALDO_EM_ABERTO", "SALDO_MOEDA", "DIAS"):
         if col in df.columns:
@@ -499,8 +441,6 @@ def _visao_geral(df: pd.DataFrame) -> None:
 
     cab_me = _legenda([("NF Compl." if m == "R$" else _SIMBOLOS.get(m, m), cores[m]) for m in por_moeda])
     bloco_me = _bloco("Aging de Vencimentos - Mercado Externo", "ME · por moeda", _COR_COMPL, cab_me, corpo_me, total_me)
-
-    _ticker_indicadores(df, total_mi + sum(sum(v[0]) for v in por_moeda.values()))
 
     # ── Cards de totais acima dos aging ──
     _cartao = partial(card_html, largura="100%", altura="96px", padding="12px 14px")
@@ -626,6 +566,10 @@ def _visao_geral(df: pd.DataFrame) -> None:
 TITULOS_SECAO = {"geral": "Visão Geral MI-ME", "mi": "Mercado Interno", "me": "Mercado Externo"}
 
 
+def _alternar_ocultar() -> None:
+    st.session_state["cr_ocultar"] = not st.session_state.get("cr_ocultar", False)
+
+
 def render(df_cr: pd.DataFrame, df_grupo_agentes=None, df_grupo_geral=None, secao: str = "geral") -> None:
     """`secao`: "geral" (visão geral), "mi" (mercado interno) ou "me" (mercado externo); cada uma é um item do menu."""
     if "cr_ocultar" not in st.session_state:
@@ -637,24 +581,30 @@ def render(df_cr: pd.DataFrame, df_grupo_agentes=None, df_grupo_geral=None, seca
         st.title(f"Contas a Receber · {TITULOS_SECAO[secao]}")
     with col_btn:
         st.markdown("<div style='margin-top:1.05rem'></div>", unsafe_allow_html=True)
-        if st.button(
-            "🙈 Ocultar" if not _ocultar_atual else "👁 Exibir",
+        # on_click (e não st.rerun): o clique roda antes da tela e todos os widgets (botão Painel | Resumo, A receber |
+        # Recebido, mês...) continuam desenhados na mesma execução; com st.rerun() eles perdiam o estado e voltavam ao padrão.
+        st.button(
+            "Ocultar" if not _ocultar_atual else "Exibir",
+            icon=":material/visibility_off:" if not _ocultar_atual else ":material/visibility:",
             key="btn_ocultar_cr", use_container_width=True,
             help="Ocultar/exibir valores nas telas de Contas a Receber",
-        ):
-            st.session_state["cr_ocultar"] = not _ocultar_atual
-            st.rerun()
+            on_click=_alternar_ocultar,
+        )
     with col_atualizar:
         st.markdown("<div style='margin-top:1.05rem'></div>", unsafe_allow_html=True)
-        if st.button("🔄 Atualizar", key="cr_painel_atualizar", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
+        st.button("🔄 Atualizar", key="cr_painel_atualizar", use_container_width=True, on_click=st.cache_data.clear)
 
     if df_cr.empty or "MERCADO" not in df_cr.columns:
         st.warning("Nenhum dado de Contas a Receber disponível.")
         return
 
     if secao == "mi":
+        # Botão Painel | Resumo logo abaixo do título (o Resumo é a visão de recebimentos por mês e PMR)
+        visao = st.segmented_control("Visão", ["Painel", "Resumo"], default="Painel", key="cr_mi_visao",
+                                     label_visibility="collapsed") or "Painel"
+        if visao == "Resumo":
+            resumo_contas_receber_mi.render(mostrar_titulo=False, ocultar=st.session_state["cr_ocultar"])
+            return
         contas_receber.render(df_cr[df_cr["MERCADO"] == "MI"], mostrar_titulo=False, df_grupo_agentes=df_grupo_agentes, df_grupo_geral=df_grupo_geral)
     elif secao == "me":
         contas_receber_externo.render(df_cr, mostrar_titulo=False)

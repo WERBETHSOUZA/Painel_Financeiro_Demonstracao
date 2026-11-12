@@ -12,6 +12,20 @@ _DIRETORIO = [
 ]
 
 
+USUARIO_DEMO, SENHA_DEMO, NOME_DEMO = "admin", "admin", "Administrador"
+
+
+def authenticate_user(username: str, password: str) -> dict:
+    """Login de demonstração (sem Active Directory): usuário `admin` e senha `admin`. Mesmo formato do painel real."""
+    usuario = sanitize_username(username)
+    if not usuario or not password:
+        return {"success": False, "error": "Informe um usuário e uma senha válidos."}
+    if usuario != USUARIO_DEMO or password != SENHA_DEMO:
+        return {"success": False, "error": f"Usuário ou senha incorretos. Use {USUARIO_DEMO} / {SENHA_DEMO}."}
+    return {"success": True, "username": USUARIO_DEMO, "name": NOME_DEMO, "groups": ["BI_FINANCEIRO_ADMIN"],
+            "email": "admin@example.com", "department": "Demonstração"}
+
+
 def sanitize_username(username: str) -> str | None:
     return str(username).strip().lower() if username else None
 

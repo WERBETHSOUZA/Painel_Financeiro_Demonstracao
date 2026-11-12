@@ -13,6 +13,7 @@ import streamlit as st
 
 from components.buttons import botao_exportar_excel
 from components.cards import card_html, render_cards_row, render_tabela_html
+from services import clientes_transferencia
 from utils.exporters import exportar_excel, REGRAS_STATUS_BOLETO
 
 _COLUNAS = {
@@ -68,7 +69,6 @@ def render(df_cr: pd.DataFrame) -> None:
             st.rerun()
 
     with st.sidebar:
-        st.write("---")
         st.caption("Boleto Não Gerado")
         status_sel = st.multiselect(
             "Status", ["LIBERADO", "BLOQUEADO"], default=["LIBERADO"], key="rbn_status",
@@ -100,6 +100,15 @@ def render(df_cr: pd.DataFrame) -> None:
     # Cliente Pessoa Física não precisa de boleto — não entra no relatório.
     if "TIPO_PESSOA" in df_base.columns:
         df_base = df_base[df_base["TIPO_PESSOA"] != "F"]
+
+    # Cliente que paga por transferência (Admin > Clientes por Transferência) não recebe boleto: sai do relatório.
+    _transf = clientes_transferencia.carregar()
+    if _transf and "COD_CLIENTE" in df_base.columns:
+        _fora = df_base["COD_CLIENTE"].astype(str).isin(_transf)
+        if _fora.any():
+            _nomes = sorted({_transf[c].get("nome") or c for c in df_base.loc[_fora, "COD_CLIENTE"].astype(str).unique()})
+            df_base = df_base[~_fora]
+            st.info(f"{len(_nomes)} cliente(s) que pagam por transferência não aparecem aqui: {', '.join(_nomes)}.")
 
     if df_base.empty:
         st.success("Todos os títulos em aberto do Mercado Interno já têm boleto gerado.")

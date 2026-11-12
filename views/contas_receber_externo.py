@@ -9,6 +9,7 @@ MERCADO = 'ME'. Os valores ficam na moeda de origem (SALDO_MOEDA) e em reais
 """
 
 import base64
+import json
 
 import pandas as pd
 import streamlit as st
@@ -19,7 +20,7 @@ from utils.exporters import adicionar_aba_ptax, exportar_excel
 from utils.imagem_email import gerar_imagem_painel_externo
 from utils.prazos import calcular_dias_prazo, formatar_dias_html, formatar_dias_unificado_html, nullar_zeros_dias, VERDE_DIAS, VERMELHO_DIAS
 from utils.ptax import (
-    buscar_historico_ptax, buscar_ptax, buscar_ptax_mes_anterior_e_vigente,
+    buscar_historico_ptax, buscar_ptax, buscar_ptax_base_mes, buscar_ptax_mes_anterior_e_vigente,
     limpar_cache_ptax, link_bcb,
 )
 
@@ -182,9 +183,10 @@ def _bloco_cartao(idx: int, moeda: str, frente_html: str, hist: list) -> str:
 
 
 _CSS_CARTOES = """
+html,body{overflow:hidden}
 body{margin:0;background:transparent;font-family:"Source Sans Pro",Arial,sans-serif;color:#E8EAF0}
 .linha{display:flex;gap:12px;align-items:flex-start}
-.cena{position:relative;width:240px;height:176px;perspective:1000px;flex:0 0 240px}
+.cena{position:relative;width:240px;height:176px;perspective:1000px;flex:0 0 240px;container-type:inline-size}
 .linha.grade{display:grid;align-items:stretch}
 .linha.grade .cena{width:auto;height:192px;flex:none;min-width:0}
 .linha.grade .cena>.cm{height:100%;box-sizing:border-box}
@@ -204,12 +206,12 @@ body{margin:0;background:transparent;font-family:"Source Sans Pro",Arial,sans-se
 .cab{color:#8892A4}
 .n{text-align:right}
 .cm{background:#1e1e2e;border-left:4px solid var(--c);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
-.l1{font-size:12px;color:#aab;padding-right:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.l1{font-size:clamp(10px,5cqw,12px);color:#aab;padding-right:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .l1 em{font-style:normal;color:#6b7488;margin-left:4px}
-.big{font-size:21px;font-weight:600;color:#fff;margin:1px 0 3px;white-space:nowrap}
-.l2{font-size:11px;color:#8892A4;white-space:nowrap}.l2 b{color:#c9d1e6;font-weight:500}
-.dif{display:inline-block;align-self:flex-start;margin-top:4px;padding:1px 7px;border-radius:5px;font-size:11px;font-weight:500}
-.mm{display:flex;justify-content:space-between;margin-top:2px}.mm span,.mm a{font-size:10px}
+.big{font-size:clamp(14px,8.75cqw,21px);font-weight:600;color:#fff;margin:1px 0 3px;white-space:nowrap}
+.l2{font-size:clamp(9px,4.6cqw,11px);color:#8892A4;white-space:nowrap}.l2 b{color:#c9d1e6;font-weight:500}
+.dif{display:inline-block;align-self:flex-start;margin-top:4px;padding:1px 7px;border-radius:5px;font-size:clamp(9px,4.6cqw,11px);font-weight:500}
+.mm{display:flex;justify-content:space-between;margin-top:2px}.mm span,.mm a{font-size:clamp(8.5px,4cqw,10px)}
 """
 _JS_CARTOES = "<script>function virar(id,on){document.getElementById(id).classList.toggle('virado',on);}</script>"
 
@@ -237,6 +239,127 @@ def _excel_historico(moeda: str, hist: list) -> bytes:
         "PTAX Compra": [h["compra"] for h in hist],
     })
     return exportar_excel(df, f"PTAX {moeda}")
+
+
+_CORES_LINHA_DIF = {"Total": "#6366f1", "USD": "#27AE60", "EUR": "#4A7FB5", "GBP": "#9B59B6"}
+
+
+def _itens_diferenca(com_ptax: dict, base_cot: dict) -> list:
+    """Diferença cambial por moeda contra uma PTAX base: saldo na moeda x (PTAX atual - PTAX base)."""
+    itens = []
+    for m, v in com_ptax.items():
+        cb = (base_cot or {}).get(m)
+        if cb:
+            itens.append({"m": m, "dif": v["saldo_m"] * (v["taxa"] - cb["venda"])})
+    return itens
+
+
+def _serie_mes(com_ptax: dict, ptax: dict, base_cot: dict, base_data) -> dict:
+    """Diferença acumulada no mês, dia a dia (fechamento PTAX), contra a PTAX do mês anterior.
+    O saldo na moeda é o de hoje, aplicado a todos os dias: mostra como o câmbio mexeu no que está em aberto agora."""
+    vazio = {"datas": [], "linhas": {}}
+    if not base_data or not base_cot:
+        return vazio
+    try:
+        hist = buscar_ptax_mes_anterior_e_vigente()
+    except Exception:
+        return vazio
+    pontos = [h for h in hist if h["data"] > base_data]
+    ult = pontos[-1]["data"] if pontos else base_data
+    if ptax.get("data_ref") and ptax["data_ref"] > ult:      # cotação do dia, se já publicada
+        pontos.append({"data": ptax["data_ref"], **{m: ptax[m] for m in ("EUR", "GBP", "USD") if ptax.get(m)}})
+    moedas = [m for m in com_ptax if base_cot.get(m)]
+    if not moedas or not pontos:
+        return vazio
+    linhas = {m: [0.0] for m in moedas}
+    for pt in pontos:
+        for m in moedas:
+            c = pt.get(m)
+            linhas[m].append(com_ptax[m]["saldo_m"] * (c["venda"] - base_cot[m]["venda"]) if c else linhas[m][-1])
+    out = {"Total": [sum(linhas[m][i] for m in moedas) for i in range(len(pontos) + 1)], **linhas}
+    return {"datas": [base_data.strftime("%d/%m")] + [pt["data"].strftime("%d/%m") for pt in pontos], "linhas": out}
+
+
+_CSS_DIF = """
+body{margin:0;background:transparent;font-family:"Source Sans Pro",Arial,sans-serif;color:#e0e0e0}
+.cena{position:relative;height:207px;margin-top:6px;perspective:1000px}
+.giro{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform .6s}
+.giro.virado{transform:rotateY(180deg)}
+.face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;background:#1e1e2e;border-radius:10px;box-sizing:border-box;padding:12px 16px 8px}
+.verso{transform:rotateY(180deg)}
+.topo{display:flex;justify-content:space-between;align-items:center}
+.tit{font-size:13px;font-weight:500}
+.seta,.voltar{background:none;border:none;color:#8892A4;font-size:14px;cursor:pointer;padding:2px 4px;line-height:1}
+.seta:hover,.voltar:hover{color:#e8eaf0}
+.opc{display:flex;gap:16px;margin:6px 0 2px;font-size:13px}
+.opc label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.opc input{accent-color:#6366f1;width:15px;height:15px;margin:0}
+.lin{display:grid;grid-template-columns:40px 1fr 104px;align-items:center;gap:8px;margin:13px 0;font-size:12px}
+.tr{position:relative;height:12px;background:#262b3b;border-radius:5px}
+.tr i{position:absolute;top:0;bottom:0}
+.tr b{position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:#6b7488}
+.val{text-align:right;font-weight:500;white-space:nowrap}
+.tot{display:grid;grid-template-columns:40px 1fr auto;gap:8px;align-items:center;margin:10px 0 2px;padding-top:8px;border-top:1px solid #2a2a3e;font-size:12px}
+.chips{display:flex;gap:10px;font-size:11px;margin:4px 0 2px;color:#c9d1e6}
+.chips label{display:flex;align-items:center;gap:4px;cursor:pointer}
+.chips input{margin:0;width:13px;height:13px}
+.graf{position:relative;height:118px;margin:4px 0 0 44px}
+.graf svg{width:100%;height:100%;display:block}
+.eixo{position:absolute;left:-44px;font-size:10px;color:#8892A4;width:40px;text-align:right}
+.datas{display:flex;justify-content:space-between;margin-left:44px;font-size:10px;color:#8892A4}
+.nota{font-size:10px;color:#6b7488;margin-top:3px}
+"""
+
+_JS_DIF = """
+const fmt=v=>D.ocultar?'••••••':Math.abs(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const mil=v=>D.ocultar?'':(v/1000).toLocaleString('pt-BR',{maximumFractionDigits:0})+' mil';
+function frente(k){
+  const d=D[k],its=[...d.itens].sort((x,y)=>Math.abs(y.dif)-Math.abs(x.dif));
+  document.getElementById('lin').innerHTML=its.length?its.map(i=>{
+    const neg=i.dif<0,w=Math.abs(i.dif)/(Math.max(...its.map(x=>Math.abs(x.dif)))||1)*50,c=neg?'#E24B4A':'#1BADA6',vc=neg?'#E24B4A':'#4caf7a';
+    const bar=neg?`<i style="right:50%;width:${w}%;background:${c};border-radius:5px 0 0 5px"></i>`:`<i style="left:50%;width:${w}%;background:${c};border-radius:0 5px 5px 0"></i>`;
+    return `<div class="lin"><span style="color:#c9d1e6">${i.m}</span><div class="tr">${bar}<b></b></div><span class="val" style="color:${vc}">${neg?'-':'+'}R$ ${fmt(i.dif)}</span></div>`}).join('')
+    :'<div style="font-size:12px;color:#8892A4;padding:10px 0">PTAX da base indisponível no momento.</div>';
+  const t=its.reduce((a,i)=>a+i.dif,0),neg=t<0;
+  document.getElementById('tot').innerHTML=its.length?`<span style="font-weight:500">Total</span><span style="color:#8892A4;font-size:11px">${d.rot}</span><span class="val" style="color:${neg?'#E24B4A':'#4caf7a'};font-weight:600">${neg?'-':'+'}R$ ${fmt(t)}</span>`:'';
+}
+const cores=D.cores,on={};
+function linhas(){
+  const S=D.serie,nomes=Object.keys(S.linhas),box=document.getElementById('chips');
+  if(!box.dataset.ok){box.innerHTML=nomes.map(n=>{on[n]=true;return `<label><input type="checkbox" checked data-n="${n}" style="accent-color:${cores[n]}">${n}</label>`}).join('');
+    box.querySelectorAll('input').forEach(c=>c.onchange=()=>{on[c.dataset.n]=c.checked;linhas()});box.dataset.ok=1}
+  const vis=nomes.filter(n=>on[n]),todos=vis.flatMap(n=>S.linhas[n]);
+  if(!S.datas.length||!todos.length){document.getElementById('graf').innerHTML='<div style="font-size:12px;color:#8892A4;padding:30px 0">Histórico do mês indisponível.</div>';return}
+  let lo=Math.min(0,...todos),hi=Math.max(0,...todos);if(hi===lo){hi=lo+1}
+  const n=S.datas.length,X=i=>n>1?i/(n-1)*300:0,Y=v=>108-(v-lo)/(hi-lo)*104+2;
+  const paths=vis.map(m=>`<polyline points="${S.linhas[m].map((v,i)=>X(i).toFixed(1)+','+Y(v).toFixed(1)).join(' ')}" fill="none" stroke="${cores[m]}" stroke-width="${m==='Total'?2.4:1.5}" vector-effect="non-scaling-stroke"/>`).join('');
+  document.getElementById('graf').innerHTML=`<svg viewBox="0 0 300 112" preserveAspectRatio="none"><line x1="0" x2="300" y1="${Y(0)}" y2="${Y(0)}" stroke="#3a3f55" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>${paths}</svg><span class="eixo" style="top:-4px">${mil(hi)}</span><span class="eixo" style="bottom:-4px">${mil(lo)}</span>`;
+  document.getElementById('datas').innerHTML=`<span>${S.datas[0]}</span><span>${S.datas[n-1]}</span>`;
+}
+document.querySelectorAll('input[name=b]').forEach(r=>r.onchange=()=>frente(r.value));
+function virar(on_){document.getElementById('g').classList.toggle('virado',on_);if(on_)linhas()}
+frente('dia');
+"""
+
+
+def _card_diferenca_html(dados: dict) -> str:
+    """Card "Diferença cambial por moeda" que gira como os cartões de PTAX: a frente mostra as barras de
+    ganho/perda com o seletor Dia anterior / Mês; o verso, a linha da diferença acumulada no mês."""
+    return (
+        f'<!doctype html><html><head><meta charset="utf-8"><style>{_CSS_DIF}</style></head><body>'
+        '<div class="cena"><div class="giro" id="g">'
+        '<div class="face frente"><div class="topo"><span class="tit">Diferença cambial por moeda</span>'
+        '<button class="seta" aria-label="Ver gráfico do mês" title="Ver gráfico do mês" onclick="virar(true)">↗</button></div>'
+        '<div class="opc"><label><input type="radio" name="b" value="dia" checked>Dia anterior</label>'
+        '<label><input type="radio" name="b" value="mes">Mês</label></div>'
+        '<div id="lin"></div><div class="tot" id="tot"></div></div>'
+        '<div class="face verso"><div class="topo"><span class="tit">Diferença acumulada no mês</span>'
+        '<button class="voltar" aria-label="Voltar" title="Voltar" onclick="virar(false)">↩</button></div>'
+        '<div class="chips" id="chips"></div><div class="graf" id="graf"></div><div class="datas" id="datas"></div>'
+        '<div class="nota">Saldo em aberto de hoje aplicado a todos os dias do mês.</div></div>'
+        '</div></div>'
+        f'<script>const D={json.dumps(dados, ensure_ascii=False)};{_JS_DIF}</script></body></html>'
+    )
 
 
 def _badge_dif(dif: float, pct: float, ocultar: bool) -> str:
@@ -270,7 +393,10 @@ def _render_ptax_bloco(df_me: pd.DataFrame, moeda_filtro: str = "Todas") -> None
     ptax = buscar_ptax()
     data_ref = ptax["data_ref"].strftime("%d/%m/%Y")
     with col_cap:
-        st.caption(f"Cotação PTAX {data_ref} · Fonte: BCB · variação vs D-2")
+        _ant = ptax.get("data_anterior")
+        _parcial = f" (parcial, {ptax['hora']}h)" if ptax.get("parcial") else ""
+        _vs = f"variação vs {_ant.strftime('%d/%m/%Y')}" if _ant else "sem variação (dia anterior indisponível)"
+        st.caption(f"Cotação PTAX {data_ref}{_parcial} · Fonte: BCB · {_vs}")
 
     _FLAGS = {"EUR": "🇪🇺", "GBP": "🇬🇧", "USD": "🇺🇸"}
     _COR_MOEDA = {"EUR": "#4A7FB5", "GBP": "#9B59B6", "USD": "#27AE60"}
@@ -308,14 +434,11 @@ def _render_ptax_bloco(df_me: pd.DataFrame, moeda_filtro: str = "Todas") -> None
                 cor_v = "#4caf7a" if var >= 0 else "#E24B4A"
                 var_html = f' <span style="color:{cor_v}">{"▲" if var >= 0 else "▼"} {abs(var):.2f}%</span>'
             linhas.append(f'PTAX <b>R$ {_fmt4(v["taxa"])}</b>{var_html}')
-            linhas.append(f'Valor Atualizado <b>R$ {_oculto(v["saldo_brl"])}</b>')
-            linhas.append(f'Cot. fat. R$ {_oculto(v["saldo_fat"])}')
             dif = v["saldo_brl"] - v["saldo_fat"]
             pct = (dif / v["saldo_fat"] * 100) if v["saldo_fat"] else 0
             dif_html = _badge_dif(dif, pct, ocultar)
         else:
             linhas.append("PTAX indisponível")
-            linhas.append(f'Cot. fat. R$ {_oculto(v["saldo_fat"])}')
         if hist_m:
             vendas = [h["venda"] for h in hist_m]
             spark_html = f'<div style="margin-top:6px">{_sparkline_svg(hist_m, cor_m)}</div>'
@@ -333,7 +456,7 @@ def _render_ptax_bloco(df_me: pd.DataFrame, moeda_filtro: str = "Todas") -> None
         linhas_t = [f'Valor Faturamento <b>R$ {_oculto(fat_total)}</b>']
         cor_t = "#4caf7a" if dif_t >= 0 else "#E24B4A"
         var_html = (
-            f'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;'
+            f'<div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:0 8px;margin-top:6px;'
             f'padding-top:6px;border-top:1px solid #2a2a3e"><span style="font-size:11px;color:#8892A4;white-space:nowrap">Variação cambial</span>'
             f'<span style="font-size:14px;font-weight:600;white-space:nowrap;color:{cor_t}">{"-" if dif_t < 0 else "+"}R$ {_oculto(abs(dif_t))} '
             f'<small style="font-size:11px;font-weight:400">({"••" if ocultar else f"{abs(pct_t):.2f}%"})</small></span></div>'
@@ -353,7 +476,7 @@ def _render_ptax_bloco(df_me: pd.DataFrame, moeda_filtro: str = "Todas") -> None
                 '<div style="display:flex;gap:10px;font-size:10px;color:#8892A4;flex-wrap:wrap">'
                 + legenda + '</div>'
             )
-        blocos.append(f'<div class="cena">{_frente_cartao("#6366f1", "Valor Atualizado<em>PTAX · venda D-1</em>", "R$ " + _oculto(total_ptax), linhas_t, var_html, "", barra_html)}</div>')
+        blocos.append(f'<div class="cena">{_frente_cartao("#6366f1", "Valor Atualizado<em>PTAX · venda</em>", "R$ " + _oculto(total_ptax), linhas_t, var_html, "", barra_html)}</div>')
 
     st.iframe(_documento_cartoes(blocos, 4), height=204)
     # ── impacto cambial: tabela à esquerda e gráfico da diferença por moeda à direita ──
@@ -361,7 +484,6 @@ def _render_ptax_bloco(df_me: pd.DataFrame, moeda_filtro: str = "Todas") -> None
         return
     dif_total = total_ptax - fat_total
     pct_total = (dif_total / fat_total * 100) if fat_total else 0
-    cols_grid = "62px 1fr 1fr 112px 1fr 1fr 62px"
     linhas_imp = ""
     for m, v in com_ptax.items():
         dif = v["saldo_brl"] - v["saldo_fat"]
@@ -369,15 +491,14 @@ def _render_ptax_bloco(df_me: pd.DataFrame, moeda_filtro: str = "Todas") -> None
         cor = "#4caf7a" if dif >= 0 else "#E24B4A"
         seta = "▲" if dif >= 0 else "▼"
         linhas_imp += (
-            f'<div style="display:grid;grid-template-columns:{cols_grid};gap:4px 10px;padding:6px 0;'
-            f'border-bottom:1px solid rgba(42,42,62,0.5);font-size:12px;align-items:center">'
-            f'<span style="color:#8892A4">{_FLAGS[m]} {m}</span>'
-            f'<span style="color:#8892A4;white-space:nowrap">{_SIMBOLOS.get(m, m)} {_oculto(v["saldo_m"])}</span>'
-            f'<span style="color:#e0e0e0;white-space:nowrap">R$ {_oculto(v["saldo_fat"])}</span>'
-            f'<span style="color:#8892A4;white-space:nowrap">{_fmt4(v["taxa"])}</span>'
-            f'<span style="color:#e0e0e0;white-space:nowrap">R$ {_oculto(v["saldo_brl"])}</span>'
-            f'<span style="color:{cor};white-space:nowrap">{seta} R$ {_oculto(abs(dif))}</span>'
-            f'<span style="color:{cor};white-space:nowrap;font-weight:500">{seta} {"••" if ocultar else f"{abs(pct):.2f}%"}</span>'
+            f'<div class="ic-r ic-lin">'
+            f'<span class="moeda" style="color:#8892A4">{_FLAGS[m]} {m}</span>'
+            f'<span data-l="Valor Moeda" style="color:#8892A4">{_SIMBOLOS.get(m, m)} {_oculto(v["saldo_m"])}</span>'
+            f'<span data-l="Valor Faturamento" style="color:#e0e0e0">R$ {_oculto(v["saldo_fat"])}</span>'
+            f'<span data-l="PTAX {data_ref}" style="color:#8892A4">{_fmt4(v["taxa"])}</span>'
+            f'<span data-l="Valor Atualizado" style="color:#e0e0e0">R$ {_oculto(v["saldo_brl"])}</span>'
+            f'<span data-l="Diferença" style="color:{cor}">{seta} R$ {_oculto(abs(dif))}</span>'
+            f'<span data-l="Valoriz. %" style="color:{cor};font-weight:500">{seta} {"••" if ocultar else f"{abs(pct):.2f}%"}</span>'
             f'</div>'
         )
     rodape_imp = ""
@@ -385,68 +506,60 @@ def _render_ptax_bloco(df_me: pd.DataFrame, moeda_filtro: str = "Todas") -> None
         cor_t = "#4caf7a" if dif_total >= 0 else "#E24B4A"
         seta_t = "▲" if dif_total >= 0 else "▼"
         rodape_imp = (
-            f'<div style="display:grid;grid-template-columns:{cols_grid};gap:4px 10px;padding:8px 0 0;'
-            f'font-size:12px;font-weight:500;align-items:center">'
-            f'<span style="color:#e0e0e0">Total</span><span></span>'
-            f'<span style="color:#e0e0e0;white-space:nowrap">R$ {_oculto(fat_total)}</span><span></span>'
-            f'<span style="color:#e0e0e0;white-space:nowrap">R$ {_oculto(total_ptax)}</span>'
-            f'<span style="color:{cor_t};white-space:nowrap">{seta_t} R$ {_oculto(abs(dif_total))}</span>'
-            f'<span style="color:{cor_t};white-space:nowrap">{seta_t} {"••" if ocultar else f"{abs(pct_total):.2f}%"}</span>'
+            f'<div class="ic-r ic-tot">'
+            f'<span class="moeda" style="color:#e0e0e0">Total</span><span></span>'
+            f'<span data-l="Valor Faturamento" style="color:#e0e0e0">R$ {_oculto(fat_total)}</span><span></span>'
+            f'<span data-l="Valor Atualizado" style="color:#e0e0e0">R$ {_oculto(total_ptax)}</span>'
+            f'<span data-l="Diferença" style="color:{cor_t}">{seta_t} R$ {_oculto(abs(dif_total))}</span>'
+            f'<span data-l="Valoriz. %" style="color:{cor_t}">{seta_t} {"••" if ocultar else f"{abs(pct_total):.2f}%"}</span>'
             f'</div>'
         )
     cabecalho = (
-        f'<div style="display:grid;grid-template-columns:{cols_grid};gap:4px 10px;padding-bottom:6px;'
-        f'border-bottom:1px solid #2a2a3e;font-size:11px;color:#8892A4">'
-        f'<span>Moeda</span><span>Valor Moeda</span><span>Valor Faturamento</span><span style="white-space:nowrap">PTAX {data_ref}</span>'
-        f'<span>Valor Atualizado</span><span>Diferença</span><span>Valoriz. %</span></div>'
+        f'<div class="ic-r ic-cab"><span>Moeda</span><span>Valor Moeda</span><span>Valor Faturamento</span>'
+        f'<span>PTAX {data_ref}</span><span>Valor Atualizado</span><span>Diferença</span><span>Valoriz. %</span></div>'
     )
-    # gráfico da diferença: perdas saem para a esquerda do eixo, ganhos para a direita
-    maximo = max(abs(v["saldo_brl"] - v["saldo_fat"]) for v in com_ptax.values()) or 1
-    linhas_graf = ""
-    for m, v in sorted(com_ptax.items(), key=lambda kv: -abs(kv[1]["saldo_brl"] - kv[1]["saldo_fat"])):
-        dif = v["saldo_brl"] - v["saldo_fat"]
-        larg = abs(dif) / maximo * 50
-        if dif < 0:
-            barra = (f'<i class="an-wipe" style="position:absolute;top:0;bottom:0;right:50%;width:{larg:.1f}%;'
-                     f'background:#E24B4A;border-radius:5px 0 0 5px"></i>')
-        else:
-            barra = (f'<i class="an-wipe" style="position:absolute;top:0;bottom:0;left:50%;width:{larg:.1f}%;'
-                     f'background:#1BADA6;border-radius:0 5px 5px 0"></i>')
-        cor_v = "#E24B4A" if dif < 0 else "#4caf7a"
-        linhas_graf += (
-            f'<div style="display:grid;grid-template-columns:40px 1fr 96px;align-items:center;gap:8px;margin:12px 0;font-size:12px">'
-            f'<span style="color:#c9d1e6">{m}</span>'
-            f'<div style="position:relative;height:12px;background:#262b3b;border-radius:5px">{barra}'
-            f'<span style="position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:#6b7488"></span></div>'
-            f'<span style="text-align:right;color:{cor_v};font-weight:500">{"-" if dif < 0 else "+"}R$ {_oculto(abs(dif))}</span></div>'
-        )
-    if len(com_ptax) > 1:
-        cor_g = "#E24B4A" if dif_total < 0 else "#4caf7a"
-        linhas_graf += (
-            f'<div style="display:grid;grid-template-columns:40px 1fr auto;gap:8px;align-items:center;margin:14px 0 2px;'
-            f'padding-top:10px;border-top:1px solid #2a2a3e;font-size:12px">'
-            f'<span style="color:#e0e0e0;font-weight:500">Total</span>'
-            f'<span style="color:#8892A4;font-size:11px">{"••" if ocultar else f"{abs(pct_total):.2f}%"} sobre o faturado</span>'
-            f'<span style="text-align:right;white-space:nowrap;color:{cor_g};font-weight:600">{"-" if dif_total < 0 else "+"}R$ {_oculto(abs(dif_total))}</span></div>'
-        )
-    c_tab, c_graf = st.columns([1.6, 1])
+    # Em card largo: tabela de 7 colunas. Em card estreito (container query): cada moeda vira um bloco
+    # de 3 colunas com rótulo em cima de cada valor, sem barra de rolagem nem texto sobreposto.
+    css_imp = (
+        "<style>.ic-wrap{container-type:inline-size}"
+        ".ic-r{display:grid;grid-template-columns:clamp(46px,8cqw,62px) repeat(2,minmax(0,1.2fr)) clamp(52px,11cqw,100px) repeat(2,minmax(0,1.2fr)) clamp(50px,8cqw,70px);"
+        "gap:4px clamp(5px,1.2cqw,10px);align-items:center;font-size:clamp(8.5px,1.7cqw,12px)}"
+        ".ic-r span{white-space:nowrap}"
+        ".ic-wrap .ic-r span{font-size:inherit}"   # vence o span{14px} do assets/styles.css
+        ".ic-cab{padding-bottom:6px;border-bottom:1px solid #2a2a3e;font-size:clamp(9px,1.5cqw,11px);color:#8892A4}"
+        ".ic-cab span{white-space:normal}"
+        ".ic-lin{padding:6px 0;border-bottom:1px solid rgba(42,42,62,.5)}"
+        ".ic-tot{padding:8px 0 0;font-weight:500}"
+        "@container (max-width:470px){.ic-cab{display:none}"
+        ".ic-r{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 10px;font-size:12px}"
+        ".ic-r span[data-l]::before{content:attr(data-l);display:block;font-size:10px;color:#6b7488;font-weight:400}"
+        ".ic-r span:empty{display:none}"
+        ".ic-wrap .ic-r span.moeda{grid-column:1/-1;font-size:13px}"
+        ".ic-lin,.ic-tot{padding:8px 0}}</style>"
+    )
+    c_tab, c_graf = st.columns([2, 1])
     with c_tab:
         st.markdown(
             f'<div style="background:#1e1e2e;border-radius:10px;padding:14px 16px;margin-top:6px">'
             f'<div style="font-size:13px;font-weight:500;color:#e0e0e0;margin-bottom:10px">'
             f'Impacto cambial — faturamento vs PTAX {data_ref}</div>'
-            + cabecalho + linhas_imp + rodape_imp + '</div>',
+            + css_imp + '<div class="ic-wrap">'
+            + cabecalho + linhas_imp + rodape_imp + '</div></div>',
             unsafe_allow_html=True,
         )
     with c_graf:
-        st.markdown(
-            f'<div style="background:#1e1e2e;border-radius:10px;padding:14px 16px;margin-top:6px">'
-            f'<div style="font-size:13px;font-weight:500;color:#e0e0e0;margin-bottom:2px">Diferença cambial por moeda</div>'
-            f'<div style="font-size:11px;color:#8892A4">perda à esquerda · ganho à direita</div>'
-            + linhas_graf + '</div>',
-            unsafe_allow_html=True,
-        )
-    st.caption("Diferença entre o valor na cotação do faturamento e o valor convertido pela PTAX atual.")
+        base_mes = buscar_ptax_base_mes()
+        dados = {
+            "ocultar": bool(ocultar), "cores": _CORES_LINHA_DIF,
+            "dia": {"itens": _itens_diferenca(com_ptax, ptax.get("anterior") or {}),
+                    "rot": f"vs PTAX de {ptax['data_anterior'].strftime('%d/%m/%Y')}" if ptax.get("data_anterior") else ""},
+            "mes": {"itens": _itens_diferenca(com_ptax, base_mes),
+                    "rot": f"vs PTAX de {base_mes['data_ref'].strftime('%d/%m/%Y')} (mês anterior)" if base_mes.get("data_ref") else ""},
+            "serie": _serie_mes(com_ptax, ptax, base_mes, base_mes.get("data_ref")),
+        }
+        st.iframe(_card_diferenca_html(dados), height=216)
+    st.caption("Tabela: diferença entre o valor na cotação do faturamento e o valor pela PTAX atual. "
+               "Gráfico: saldo na moeda × (PTAX atual − PTAX da base escolhida).")
 
 
 _PAISES = {
@@ -468,7 +581,7 @@ def _render_containers(df: pd.DataFrame) -> None:
 
     esc = _html.escape
     tem = df["CONTAINER"].notna() & (df["CONTAINER"].astype(str).str.strip() != "")
-    # NF Complementar ME (operação própria) normalmente não tem container: não conta como "sem container"
+    # NF Complementar ME (ação 262) normalmente não tem container: não conta como "sem container"
     if "CLASSIFICACAO" in df.columns:
         sem_container = int((~tem & (df["CLASSIFICACAO"].astype(str) != "NF Complementar ME")).sum())
     else:

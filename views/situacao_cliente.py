@@ -1,9 +1,13 @@
+import re
+
 import streamlit as st
 import pandas as pd
 from functools import partial
 from components.buttons import botao_exportar_excel, botoes_acao_row
-from components.cards import card_html, render_cards_row, render_tabela_html, situacao_faturamento
+from components.cards import card_html, render_cards_row, render_tabela_html, situacao_faturamento, tamanho_auto
+from services.data_service import carregar_regra_desconto_cliente
 from utils.exporters import exportar_excel
+from utils.mercado import sufixo_mercado
 from utils.prazos import calcular_dias_prazo, formatar_dias_html, formatar_dias_unificado_html, texto_dias_para_imagem, VERDE_DIAS, VERMELHO_DIAS
 from datetime import date
 
@@ -28,8 +32,8 @@ def _formatar_moeda(valor) -> str:
 
 
 # Cards da Situação Cliente: mais largos e com valor menor, para caber valores como
-# R$ 999.999.999,99 em uma linha só e manter todos com a mesma altura.
-# 236 px: cabe "R$ 888.888.888,88" (202 px na fonte de 26 px) em uma linha, com recuo de 12 px.
+# R$ 254.170.458,49 em uma linha só e manter todos com a mesma altura.
+# 236 px: cabe "R$ 296.887.874,36" (202 px na fonte de 26 px) em uma linha, com recuo de 12 px.
 _ESTILO_CARD_SC = dict(largura="236px", altura="96px", padding="12px 12px")
 
 _SIMBOLOS_MOEDA = {"USD": "US$", "EUR": "€", "GBP": "£"}
@@ -205,6 +209,18 @@ def _regra_desconto(df_cr_sel: pd.DataFrame) -> str:
     return _formatar_regra(tipo, perc)
 
 
+def _regra_do_cliente(df_cliente: pd.DataFrame, codigo_agente) -> str:
+    """Regra do card: a dos títulos em aberto; sem títulos (ou sem regra neles), a do cadastro do cliente."""
+    regra = _regra_desconto(df_cliente)
+    if regra != "Sem desconto":
+        return regra
+    try:
+        cadastro = carregar_regra_desconto_cliente(int(codigo_agente))
+    except (TypeError, ValueError):
+        return regra
+    return _formatar_regra(*cadastro) if cadastro else regra
+
+
 def render(
     df_contas_receber: pd.DataFrame,
     df_grupo_agentes: pd.DataFrame,
@@ -252,7 +268,7 @@ def render(
         "Cliente:",
         codigos,
         index=None,
-        format_func=lambda cod: f"{cod} - {nomes[cod]}",
+        format_func=lambda cod: f"{nomes[cod]} - {cod}",
         placeholder="Buscar cliente por código ou nome...",
         key="sc_cliente_cod",
     )
@@ -311,6 +327,8 @@ def render(
             m for m in df_cliente["MOEDA"].dropna().unique() if m != "R$"
         )
 
+    st.subheader(f"CLIENTE - {cliente_sel}{sufixo_mercado(df_cliente)}")
+
     # ── Cards de resumo ─────────────────────────────────────────────────────
     # Títulos em reais do cliente (notas de complemento): não têm valor na moeda estrangeira.
     saldo_em_reais = 0.0
@@ -318,45 +336,74 @@ def render(
         em_reais = df_cliente[~df_cliente["MOEDA"].isin(moedas_cliente)]
         saldo_em_reais = float(em_reais["SALDO_EM_ABERTO"].sum())
 
-    _card_sc = partial(card_html, largura="100%", altura="112px", padding="14px 12px", topo=True)
+    _card_base = partial(card_html, largura="100%", altura="112px", padding="14px 12px", topo=True)
+
+    def _card_sc(label, valor, **kw):
+        """Valor com fonte que encolhe até caber na largura do card (tela pequena), sem cortar o texto. Se o valor tem
+        quebra de linha (<br>), conta só a linha mais longa."""
+        if not kw.get("subtitulo"):
+            kw["subtitulo"] = "&nbsp;"   # reserva a linha: o valor fica na mesma altura em todos os cards
+        if "tamanho_valor" not in kw:
+            linhas = re.sub(r"<[^>]+>", "", str(valor).replace("<br>", "|")).split("|")
+            kw["tamanho_valor"] = tamanho_auto(max(linhas, key=len), max_px=26, min_px=13, fator=0.53, reserva=30)
+        return _card_base(label, valor, **kw)
 
     # Placeholder no topo para o spinner de adiantamento (preenchido quando o botão é clicado).
     _adto_top = st.empty()
 
-    # Adiantamento: consulta às vezes lenta (função por linha), então só roda
+    # Adiantamento: consulta Oracle às vezes lenta (função por linha), então só roda
     # quando o usuário pede — não trava o carregamento normal da tela.
     chave_adto = f"_sc_adto_{codigo_agente}"
-    valor_adto = _formatar_numero(st.session_state[chave_adto]) if chave_adto in st.session_state else "—"
+    valor_adto = _formatar_moeda(st.session_state[chave_adto]) if chave_adto in st.session_state else "—"
     chave_btn_adto = f"sc_carregar_adto_{codigo_agente}"
 
-    # Linha 1 (saldo e risco): saldo em R$, um card por moeda estrangeira, NF complementar
-    # (só Mercado Externo), a vencer, vencido e inadimplência. Linha 2 (títulos e situação)
-    # termina no adiantamento, com o botão preso ao próprio card. As duas linhas usam o
-    # mesmo número de colunas para os cards terem sempre a mesma largura.
-    cards_linha1 = []
+    # Grade de 4 cards por linha, em qualquer tamanho de tela: saldo (um card por moeda estrangeira e o total em R$, este
+    # com a quantidade de títulos em aberto), a vencer, vencido (cada um com a sua quantidade), inadimplência, adiantamento
+    # (botão preso ao próprio card), situação documental, status e, só no Mercado Interno, a regra de desconto.
+    _qtd_a_vencer = int((df_cliente["SITUACAO"] == "A VENCER").sum()) if "SITUACAO" in df_cliente.columns else 0
+    _so_externo = sufixo_mercado(df_cliente) == " - Mercado Externo"
+    _sit_fat_val, _sit_fat_sub, _sit_fat_cor = situacao_faturamento(df_cliente)
+
+    # Status ("Faturamento Bloqueado"): numa linha só quando o card tem largura; em duas linhas, na fonte normal, só quando
+    # o card fica estreito (janela pequena). A quebra e a linha em branco do subtítulo dependem da largura do card (CSS).
+    _status_1_linha = re.sub(r"<[^>]+>", "", _sit_fat_val.replace("<br>", " "))
+    st.markdown(
+        "<style>@container (min-width: 275px){.sc-br{display:none}}"
+        "@container (max-width: 274px){.sc-subv{display:none}}</style>",
+        unsafe_allow_html=True,
+    )
+    _card_status = _card_sc(
+        "Status", _sit_fat_val.replace("<br>", " <br class='sc-br'>"),
+        subtitulo=_sit_fat_sub or "<span class='sc-subv'>&nbsp;</span>", cor_borda=_sit_fat_cor,
+        tamanho_valor=tamanho_auto(_status_1_linha, max_px=26, min_px=22, fator=0.53, reserva=30),
+    )
+
+    _slots = []
     for m in moedas_cliente:
         d = df_cliente[df_cliente["MOEDA"] == m]
-        cards_linha1.append(_card_sc(
+        _slots.append(_card_sc(
             f"Total em Aberto {_SIMBOLOS_MOEDA.get(m, m)}",
             f"{_SIMBOLOS_MOEDA.get(m, m)} {_formatar_numero(d['SALDO_MOEDA'].sum())}",
-            cor_borda="#4A7FB5",
+            subtitulo=f"{len(d)} título(s)", cor_borda="#4A7FB5",
         ))
-    cards_linha1.append(_card_sc("Total em Aberto R$", _formatar_moeda(saldo_total), cor_borda="#6366f1"))
-    cards_linha1 += [
-        _card_sc("Total a Vencer", _formatar_moeda(total_a_vencer), cor_borda="#22c55e"),
-        _card_sc("Total Vencido", _formatar_moeda(total_vencido), cor_borda="#E24B4A"),
+    _slots += [
+        _card_sc("Total em Aberto R$", _formatar_moeda(saldo_total), subtitulo=f"{qtd_titulos_abertos} título(s)", cor_borda="#6366f1"),
+        _card_sc("Total a Vencer", _formatar_moeda(total_a_vencer), subtitulo=f"{_qtd_a_vencer} título(s)", cor_borda="#22c55e"),
+        _card_sc("Total Vencido", _formatar_moeda(total_vencido), subtitulo=f"{qtd_titulos_vencidos} título(s)", cor_borda="#E24B4A"),
         _card_sc("% Inadimplência", f"{pct_inadimplencia:.2f}%".replace(".", ","), cor_borda=cor_inadimplencia),
+        "ADIANTAMENTO",
+        _card_sc("Situação Documental", situacao_cliente.capitalize(), cor_borda=cor_situacao),
+        _card_status,
     ]
-    _n_cols = max(6, len(cards_linha1) + 1)
-    _linha1 = st.columns(_n_cols)
-    for _col, _card in zip(_linha1, cards_linha1):
-        with _col:
-            st.markdown(_card, unsafe_allow_html=True)
-    with _linha1[len(cards_linha1)]:
+    if not _so_externo:   # a regra de desconto só existe no Mercado Interno
+        _regra_desc = _regra_do_cliente(df_cliente, codigo_agente)
+        _slots.append(_card_sc("Regra de Desconto", _regra_desc, cor_borda="#8B5CF6"))   # numa linha só: a fonte se ajusta
+
+    def _card_adiantamento():
         with st.container(key="sc_adto_wrap"):
             st.markdown(_card_sc(
                 "<span style='display:inline-block;padding-right:24px;box-sizing:border-box;'>"
-                "Adiantamento Recebido em Aberto</span>",
+                "Adiantamento em Aberto</span>",
                 valor_adto, cor_borda="#2ECC71",
             ), unsafe_allow_html=True)
             st.markdown(
@@ -381,26 +428,15 @@ def render(
                 )
                 st.rerun()
 
-    st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
-
-    _sit_fat_val, _sit_fat_sub, _sit_fat_cor = situacao_faturamento(df_cliente)
-    _regra_desc = _regra_desconto(df_cliente)
-    # Tipo e percentual em duas linhas, na mesma fonte dos demais valores.
-    _regra_card = _regra_desc
-    if _regra_desc.endswith("%") and " - " in _regra_desc:
-        _tipo_regra, _perc_regra = _regra_desc.rsplit(" - ", 1)
-        _regra_card = f"{_tipo_regra}<br>{_perc_regra}"
-    _linha2 = st.columns(_n_cols)
-    _cards_linha2 = [
-        _card_sc("Qtd. Títulos em Aberto", str(qtd_titulos_abertos), cor_borda="#BA7517"),
-        _card_sc("Qtd. Títulos Vencidos", str(qtd_titulos_vencidos), cor_borda="#BA1717"),
-        _card_sc("Situação Documental", situacao_cliente.capitalize(), cor_borda=cor_situacao),
-        _card_sc("Status", _sit_fat_val, subtitulo=_sit_fat_sub, cor_borda=_sit_fat_cor),
-        _card_sc("Regra de Desconto", _regra_card, cor_borda="#8B5CF6"),
-    ]
-    for _col, _card in zip(_linha2, _cards_linha2):
-        with _col:
-            st.markdown(_card, unsafe_allow_html=True)
+    for _ini in range(0, len(_slots), 4):
+        if _ini:
+            st.markdown("<div style='height:16px;'></div>", unsafe_allow_html=True)
+        for _col, _slot in zip(st.columns(4), _slots[_ini:_ini + 4]):
+            with _col:
+                if _slot == "ADIANTAMENTO":
+                    _card_adiantamento()
+                else:
+                    st.markdown(_slot, unsafe_allow_html=True)
     adiantamento_recebido = st.session_state.get(chave_adto)
 
     st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
@@ -432,7 +468,7 @@ def render(
     else:
         df_titulos = df_cliente.copy()
 
-    # Imagem: os mesmos cards da tela, na mesma ordem (linha 1 saldo/risco, linha 2 títulos/situação).
+    # Imagem: os mesmos cards da tela, na mesma ordem e em 4 por linha.
     cards_para_imagem = []
     for m in moedas_cliente:
         d = df_cliente[df_cliente["MOEDA"] == m]
@@ -441,23 +477,17 @@ def render(
             "valor": f"{_SIMBOLOS_MOEDA.get(m, m)} {_formatar_numero(d['SALDO_MOEDA'].sum())}",
             "cor": (55, 138, 221),
         })
-    cards_para_imagem.append({"label": "Total em Aberto R$", "valor": _formatar_moeda(saldo_total), "cor": (99, 102, 241)})
     cards_para_imagem += [
-        {"label": "Total a Vencer", "valor": _formatar_moeda(total_a_vencer), "cor": (34, 197, 94)},
-        {"label": "Total Vencido", "valor": _formatar_moeda(total_vencido), "cor": (226, 75, 74)},
+        {"label": "Total em Aberto R$", "valor": _formatar_moeda(saldo_total), "sub": f"{qtd_titulos_abertos} título(s)", "cor": (99, 102, 241)},
+        {"label": "Total a Vencer", "valor": _formatar_moeda(total_a_vencer), "sub": f"{_qtd_a_vencer} título(s)", "cor": (34, 197, 94)},
+        {"label": "Total Vencido", "valor": _formatar_moeda(total_vencido), "sub": f"{qtd_titulos_vencidos} título(s)", "cor": (226, 75, 74)},
         {"label": "% Inadimplência", "valor": f"{pct_inadimplencia:.2f}%".replace(".", ","), "cor": (226, 75, 74)},
-    ]
-    cards_para_imagem.append({"label": "Adiantamento em Aberto", "valor": valor_adto, "cor": (46, 204, 113)})
-    # completa a linha 1 para a linha 2 começar sempre na coluna 1
-    while len(cards_para_imagem) % _n_cols:
-        cards_para_imagem.append(None)
-    cards_para_imagem += [
-        {"label": "Qtd. Títulos em Aberto", "valor": str(qtd_titulos_abertos), "cor": (186, 117, 23)},
-        {"label": "Qtd. Títulos Vencidos", "valor": str(qtd_titulos_vencidos), "cor": (186, 23, 23)},
+        {"label": "Adiantamento em Aberto", "valor": valor_adto, "cor": (46, 204, 113)},
         {"label": "Situação Documental", "valor": situacao_cliente.capitalize(), "cor": (99, 102, 241)},
         {"label": "Status", "valor": _sit_fat_val.replace("<br>", chr(10)), "cor": (226, 75, 74) if "Bloqueado" in _sit_fat_val else (34, 197, 94)},
-        {"label": "Regra de Desconto", "valor": _regra_desc, "cor": (139, 92, 246)},
     ]
+    if not _so_externo:
+        cards_para_imagem.append({"label": "Regra de Desconto", "valor": _regra_desc, "cor": (139, 92, 246)})
 
     if df_titulos.empty:
         st.success("Nenhum título em aberto para este cliente.")
@@ -465,7 +495,7 @@ def render(
         imagem_vazia = _gerar_imagem_situacao_cached(
             codigo_agente, cliente_sel, cards_para_imagem, pd.DataFrame(),
             mensagem_vazia="Nenhum título em aberto para este cliente.",
-            cards_por_linha=_n_cols,
+            cards_por_linha=4,
         )
         botoes_acao_row(
             imagem={"data": imagem_vazia, "file_name": f"Situacao_{cliente_sel}.png", "key": "sc_export_imagem_vazio"},
@@ -488,6 +518,7 @@ def render(
             "DIAS_VENCIDO":      "Dias Vencto.",
             "SITUACAO":         "Situação Vencto.",
             "CLASSIFICACAO":    "Classificação",
+            "COMPLEMENTO":      "Complemento",    # sempre a última coluna (tela, planilha e imagem)
 
         }
         # Colunas de moeda só aparecem para clientes com moeda estrangeira.
@@ -510,6 +541,10 @@ def render(
         df_exib = df_titulos[colunas_existentes].copy()
         if "CLASSIFICACAO" in df_exib.columns:
             df_exib["CLASSIFICACAO"] = df_exib["CLASSIFICACAO"].fillna("")
+        if "COMPLEMENTO" in df_exib.columns:
+            # em uma linha só; vazio vira "-"
+            df_exib["COMPLEMENTO"] = (df_exib["COMPLEMENTO"].fillna("").astype(str)
+                                      .str.replace(r"\s+", " ", regex=True).str.strip().replace("", "-"))
 
         # Base para o Excel: datas e valores reais (não texto), cotação com 4 casas.
         df_excel = df_exib.copy()
@@ -541,14 +576,15 @@ def render(
 
         df_exib = df_exib.rename(columns=colunas_exibir)
 
-        render_tabela_html(df_exib, coluna_situacao="Situação Vencto.")
+        render_tabela_html(df_exib, coluna_situacao="Situação Vencto.", coluna_complemento="Complemento")
 
         st.markdown("---")
 
         arquivo_excel = exportar_excel(df_excel, "SITUACAO_CLIENTE",
                                       colunas_situacao=("Situação Vencto.",),
                                       colunas_centralizar=("Dias Vencto.",),
-                                      colunas_verde_vermelho=("Dias Vencto.",))
+                                      colunas_verde_vermelho=("Dias Vencto.",),
+                                      titulo_planilha=f"Títulos do Cliente — {codigo_agente} — {cliente_sel}")
         _codigos_nota = (
             df_grupo_agentes.loc[df_grupo_agentes["COD_GRUPO"] == df_grupo_agentes.loc[
                 df_grupo_agentes["COD_AGENTE"].astype(str) == str(codigo_agente), "COD_GRUPO"
@@ -568,7 +604,7 @@ def render(
                 _painel_situacao_titulos_imagem(total_a_vencer, total_vencido, qtd_titulos_a_vencer, qtd_titulos_vencidos),
             ],
             max_linhas_tabela=_MAX_LINHAS_IMAGEM,
-            cards_por_linha=_n_cols,
+            cards_por_linha=4,
             nota_rodape=_texto_representatividade(df_contas_receber, _codigos_nota),
         )
         botoes_acao_row(

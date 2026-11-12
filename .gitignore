@@ -7,3 +7,6 @@ _prints_tmp/
 POSTAGEM_LINKEDIN/
 config/permissoes.json
 config/permissoes_backup/
+config/clientes_transferencia.json
+config/opcoes.json
+config/*.tmp

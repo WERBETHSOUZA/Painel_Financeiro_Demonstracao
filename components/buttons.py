@@ -6,13 +6,15 @@ aparência (ícone, texto, cor) em qualquer lugar do painel. Para um relatório
 novo, use botao_exportar_excel() em vez de um st.download_button avulso.
 """
 
+from collections.abc import Callable
+
 import streamlit as st
 
 _MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def botao_exportar_excel(
-    data: bytes,
+    data: bytes | Callable[[], bytes],
     file_name: str,
     key: str | None = None,
     use_container_width: bool = False,
@@ -22,7 +24,8 @@ def botao_exportar_excel(
     """Botão padrão "Exportar para Excel" (ícone de download azul + texto),
     usado em todos os relatórios com exportação. Devolve True no clique,
     igual ao st.download_button original. Em layouts compactos (colunas
-    estreitas), use label="Excel" mantendo o mesmo ícone."""
+    estreitas), use label="Excel" mantendo o mesmo ícone. Com um relatório pesado, passe uma função
+    (data=lambda: gerar()) para o arquivo só ser gerado quando o botão for clicado."""
     return st.download_button(
         label=label,
         data=data,

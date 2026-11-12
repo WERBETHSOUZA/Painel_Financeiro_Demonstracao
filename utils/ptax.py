@@ -54,12 +54,21 @@ def _buscar_dia(moeda: str, data: datetime.date) -> Optional[dict]:
     valores = _get(_URL_DIA.format(moeda=moeda, data=_fmt(data)))
     if valores:
         d = valores[-1]
-        return {"compra": float(d["cotacaoCompra"]), "venda": float(d["cotacaoVenda"])}
+        return {
+            "compra": float(d["cotacaoCompra"]), "venda": float(d["cotacaoVenda"]),
+            # no dia corrente o último boletim pode ser intermediário (ainda sem o fechamento)
+            "parcial": not str(d.get("tipoBoletim", "Fechamento")).startswith("Fechamento"),
+            "hora": str(d.get("dataHoraCotacao", ""))[11:16],
+        }
     return None
 
 
-def _candidatos(n: int) -> list[datetime.date]:
+def _candidatos(n: int, incluir_hoje: bool = False) -> list[datetime.date]:
+    """Dias úteis candidatos, do mais recente para o mais antigo. Com `incluir_hoje`,
+    o dia corrente (se for dia útil) vem primeiro; sem ele, começa em D-1."""
     cands, d = [], datetime.date.today()
+    if incluir_hoje and d.weekday() < 5:
+        cands.append(d)
     while len(cands) < n:
         d = _ultimo_dia_util(d)
         cands.append(d)
@@ -70,9 +79,11 @@ class _PtaxIndisponivel(Exception):
     """BCB não respondeu para nenhuma data candidata. Exceção não fica no cache do Streamlit."""
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def _buscar_ptax_cache() -> dict:
-    cands = _candidatos(10)
+    # Tenta a cotação do dia; se o BCB ainda não publicou (antes das ~10h, feriado), cai para o
+    # último dia útil com cotação. A variação é sempre contra o dia útil anterior ao usado.
+    cands = _candidatos(10, incluir_hoje=True)
 
     d1 = d2 = None
     d1_idx = 0
@@ -89,6 +100,10 @@ def _buscar_ptax_cache() -> dict:
     if d1 is None:
         raise _PtaxIndisponivel()
 
+    d1["data_anterior"] = d2["data_ref"] if d2 else None
+    d1["anterior"] = {m: d2.get(m) for m in ("EUR", "GBP", "USD")} if d2 else {}
+    d1["parcial"] = any(d1[m]["parcial"] for m in ("EUR", "GBP", "USD") if d1.get(m))
+    d1["hora"] = max((d1[m]["hora"] for m in ("EUR", "GBP", "USD") if d1.get(m)), default="")
     for m in ("EUR", "GBP", "USD"):
         if d1.get(m) and d2 and d2.get(m):
             v1, v2 = d1[m]["venda"], d2[m]["venda"]
@@ -101,7 +116,9 @@ def _buscar_ptax_cache() -> dict:
 
 def buscar_ptax() -> dict:
     """
-    Retorna cotações PTAX D-1 com variação vs D-2.
+    Retorna a PTAX mais recente (a do dia, se já publicada; senão a do último dia útil)
+    com variação vs o dia útil anterior (`data_anterior`). `parcial` indica boletim
+    intermediário do dia, ainda sem o fechamento.
 
     Estrutura por moeda:
         {"compra": float, "venda": float, "var_venda": float | None}
@@ -111,12 +128,33 @@ def buscar_ptax() -> dict:
     try:
         return _buscar_ptax_cache()
     except _PtaxIndisponivel:
-        return {"data_ref": datetime.date.today(), "EUR": None, "GBP": None, "USD": None}
+        return {"data_ref": datetime.date.today(), "data_anterior": None, "anterior": {}, "parcial": False,
+                "hora": "", "EUR": None, "GBP": None, "USD": None}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _base_mes_cache() -> dict:
+    ult = datetime.date.today().replace(day=1) - datetime.timedelta(days=1)
+    r = buscar_ptax_data(ult)
+    if not any(r.get(m) for m in ("EUR", "GBP", "USD")):
+        raise _PtaxIndisponivel()
+    return r
+
+
+def buscar_ptax_base_mes() -> dict:
+    """PTAX de venda do último dia útil do mês anterior: base da variação cambial do mês.
+    Retorna {"data_ref": date, "USD": {"venda": ...} | None, "EUR": ..., "GBP": ...}.
+    Falha do BCB não fica em cache."""
+    try:
+        return _base_mes_cache()
+    except _PtaxIndisponivel:
+        return {"data_ref": None, "USD": None, "EUR": None, "GBP": None}
 
 
 def limpar_cache_ptax() -> None:
     """Descarta a cotação e o histórico em cache para buscar de novo no BCB."""
     _buscar_ptax_cache.clear()
+    _base_mes_cache.clear()
     buscar_historico_ptax.clear()
 
 
