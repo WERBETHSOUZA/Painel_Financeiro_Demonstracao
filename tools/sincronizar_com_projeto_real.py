@@ -8,6 +8,7 @@ O que faz
   trocando os nomes da empresa por nomes genéricos (ver TROCAS_GERAIS) e tirando do menu o que não existe na demo.
 - NÃO copia `services/data_service.py` (na demo ele devolve dados inventados), `services/auth_service.py` (login de
   demonstração) nem `config/*.json`.
+- Regera o README.md a partir do README do projeto real (docs/README_modelo.md + as seções de produção, sem os nomes reais).
 - No fim confere se sobrou algum nome real (empresa, pessoas, clientes) nos arquivos da demo e avisa.
 
 A demo roda por `app_demo.py`, que só semeia os grupos de demonstração e executa o `app.py` copiado.
@@ -41,6 +42,7 @@ TROCAS_GERAIS = [
     ("Fretes Mot - Ibacem x Pegasus", "Fretes Mot - Matriz x Filial"),
     ("Ibacem x Pegasus", "Matriz x Filial"),
     ("ibacem_pegasus", "matriz_filial"),
+    ("IBACEM_PEGASUS", "MATRIZ_FILIAL"),
     ("ibacem_logo.png", "demo_logo.png"),
     ("ArcelorMittal", "Siderúrgica"),
     ("Arcelor Mittal", "Siderúrgica"),
@@ -116,6 +118,82 @@ def _copiar(origem: Path, destino: Path, tratar_app: bool = False, avisos: list 
     destino.write_text(texto, encoding="utf-8", newline="\n")
 
 
+# ── README: mesmas seções do painel de produção, com nomes genéricos ──────────────────────────────────────────────
+README_REAL = REAL / "README.md"
+README_MODELO = DEMO / "docs" / "README_modelo.md"
+SECOES_README = {          # marcador no modelo -> trecho do título da seção no README real
+    "{{ESTRUTURA}}": "Estrutura do Projeto",
+    "{{PAINEIS}}": "Painéis Disponíveis",
+    "{{EXPORTACAO}}": "Exportação e Compartilhamento",
+    "{{PERFORMANCE}}": "Performance",
+    "{{ARQUITETURA}}": "Arquitetura",
+}
+# Linhas da estrutura que na demo são diferentes ou não existem: trecho da linha -> aviso no fim dela
+MARCAS_ESTRUTURA = {
+    ".env  ": "  [não usado na demo]",
+    "auth_config.yaml": "  [não usado na demo]",
+    "smtp_config.json": "  [não usado na demo]",
+    "services/data_service": "  [na demo: dados fictícios]",
+    "data_service.py ": "  [na demo: dados fictícios, sem Oracle]",
+    "auth_service.py": "  [na demo: login admin / admin]",
+    "relatorio_movimentacao_financeira.py": "  [fora da demonstração]",
+    "relatorio_extrato_saldo_bancos.py": "  [fora da demonstração]",
+    "QUERY_MOVIMENTACAO_FINANCEIRA.sql": "  [fora da demonstração]",
+    "QUERY_SALDOS_BANCARIOS.sql": "  [fora da demonstração]",
+}
+SUBSTITUICOES_README = [   # (regex, novo) aplicadas só ao trecho de painéis
+    (r"- \*\*Extratos Bancários:\*\*.*", "- **Extratos Bancários:** *(fora da demonstração: depende de acesso direto ao banco)*"),
+    (r"- \*\*Saldos Bancários\*\*.*", "- **Saldos Bancários:** *(fora da demonstração)*"),
+]
+NOTA_PERFORMANCE = ("> Na demonstração os dados são gerados em memória (sem Oracle); os tempos, caches e o acesso ao banco descritos "
+                    "abaixo são os do painel de produção.\n\n")
+
+
+def _secoes_readme(texto: str) -> dict:
+    """Divide o README real em seções ('## título') e devolve {título: texto completo da seção, sem o '---' final}."""
+    blocos = re.split(r"\n(?=## )", texto.replace("\r\n", "\n"))
+    saida = {}
+    for b in blocos:
+        if not b.startswith("## "):
+            continue
+        titulo = b.split("\n", 1)[0]
+        saida[titulo] = re.sub(r"\n+---\s*$", "", b.rstrip()) + "\n"
+    return saida
+
+
+def gerar_readme() -> list:
+    avisos: list = []
+    secoes = _secoes_readme(_ler(README_REAL))
+    modelo = _ler(README_MODELO)
+    for marcador, trecho in SECOES_README.items():
+        achados = [t for t in secoes if trecho in t]
+        if marcador not in modelo:
+            avisos.append(f"README: marcador {marcador} ausente no modelo")
+            continue
+        if len(achados) != 1:
+            avisos.append(f"README: seção '{trecho}' não encontrada no README real ({len(achados)} achadas)")
+            continue
+        corpo = _sanear(secoes[achados[0]])
+        if marcador == "{{ESTRUTURA}}":
+            linhas = []
+            for linha in corpo.split("\n"):
+                for chave, marca in MARCAS_ESTRUTURA.items():
+                    if chave in linha and marca.strip() not in linha:
+                        linha = linha.rstrip() + marca
+                        break
+                linhas.append(linha)
+            corpo = "\n".join(linhas)
+        if marcador == "{{PAINEIS}}":
+            for padrao, novo in SUBSTITUICOES_README:
+                corpo = re.sub(padrao, novo, corpo)
+        if marcador == "{{PERFORMANCE}}":
+            cab, _, resto = corpo.partition("\n")
+            corpo = cab + "\n\n" + NOTA_PERFORMANCE + resto.lstrip("\n")
+        modelo = modelo.replace(marcador, corpo.rstrip("\n"))
+    (DEMO / "README.md").write_text(modelo, encoding="utf-8", newline="\n")
+    return avisos
+
+
 def sincronizar() -> list:
     avisos: list = []
     copiados = []
@@ -151,6 +229,8 @@ def sincronizar() -> list:
 
     # tela de relatório renomeada: os imports dentro das outras telas já foram trocados por _sanear
     print(f"{len(copiados)} arquivos copiados do projeto real.")
+    avisos += gerar_readme()
+    print("README.md regerado a partir do README de produção.")
     return avisos
 
 

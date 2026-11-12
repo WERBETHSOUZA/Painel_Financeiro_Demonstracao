@@ -3,7 +3,7 @@ views/relatorio_fretes_mot_matriz_filial.py
 =============================================
 Relatório "Fretes Mot - Matriz x Filial": contas a pagar das organizações 6 (Demo) e 42500 (Filial) para a
 Transportadora Filial (42501) e a Siderúrgica (678), com o rateio por classe, centro de custo e projeto
-(QUERY_FRETES_MOT_DEMO_FILIAL.sql). O período (data de prorrogação, dia final incluído; abre no mês vigente) é escolhido
+(QUERY_FRETES_MOT_MATRIZ_FILIAL.sql). O período (data de prorrogação, dia final incluído; abre no mês vigente) é escolhido
 na barra lateral e só ele vai ao banco. Os rateios ficam em uma linha só (separados por " | ").
 """
 
