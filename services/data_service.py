@@ -135,27 +135,35 @@ def carregar_historico_pagamentos_me(agentes: tuple) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def carregar_notas_pendentes_validacao():
-    """Pendências das notas bloqueadas ou em validação manual (uma linha por documento), inventadas: o cliente 1102 tem 3 notas
-    bloqueantes, o 1104 tem 2 em validação manual e o 1302 tem 2 bloqueantes e 3 em validação manual."""
+    """Pendências das notas bloqueadas ou em validação manual (uma linha por documento que bloqueia), inventadas: o cliente 1102 tem 3
+    notas bloqueantes, o 1104 tem 2 em validação manual e o 1302 tem 2 bloqueantes e 3 em validação manual. Cada nota traz os
+    documentos que bloqueiam (CNH, nota fiscal com canhoto, carta de temperatura e, às vezes, aceite do pedido) em estados diferentes:
+    vencido (2), validando (1), não anexado (0) ou regularizado (3)."""
     hoje = pd.Timestamp(date.today())
     rng = np.random.RandomState(nv.SEMENTE + 40)
-    docs = ["CNH do motorista", "Carta de temperatura", "PTV", "Nota fiscal com canhoto", "Relatório de Expedição", "Dados do motorista e veículo"]
+    docs = [("CNH", "CNH do motorista"), ("NFCANHOTO", "Nota fiscal com canhoto"), ("CARTATEMP", "Carta de temperatura"),
+            ("ACEITEPED", "Aceite do Pedido de Venda")]
     linhas, nf = [], 61200
     for cod, tipo, n in [(1102, "bloq", 3), (1104, "manual", 2), (1302, "bloq", 2), (1302, "manual", 3)]:
         for _ in range(n):
             nf += int(rng.randint(3, 30))
             controle = f"CTV-2026-{nf + 3000:06d}"
-            escolhidos = list(rng.choice(docs, size=int(rng.randint(1, 5)), replace=False))
+            qtd = int(rng.randint(2, 4)) + (1 if rng.rand() < 0.25 else 0)
+            idx = list(rng.choice(len(docs), size=min(qtd, len(docs)), replace=False))
             prazo = hoje + pd.Timedelta(days=int(rng.randint(-4, -1)) if tipo == "bloq" else int(rng.randint(1, 8)))
-            for k, d in enumerate(escolhidos):
+            for k, i in enumerate(idx):
+                codigo, nome = docs[i]
                 if k == 0 and tipo == "bloq":
-                    status, bloqueia, motivo = 2, 1, f"Documento {d} aguardando conclusão da validação OCR/revisão. Prazo documental vencido."
+                    status, bloqueia, motivo = 2, 1, f"Documento {nome} ainda não foi anexado. Prazo documental vencido."
                 elif k == 0:
-                    status, bloqueia, motivo = 1, 0, f"Documento {d} aguardando conclusão da validação OCR/revisão."
+                    status, bloqueia, motivo = 1, 0, f"Documento {nome} aguardando conclusão da validação OCR/revisão."
+                elif rng.rand() < 0.5:
+                    status, bloqueia, motivo = 3, 0, f"Documento {nome} validado."
                 else:
-                    status, bloqueia, motivo = 0, 0, f"Documento obrigatório {d} ainda não foi anexado ao checklist."
+                    status, bloqueia, motivo = 0, 0, f"Documento obrigatório {nome} ainda não foi anexado ao checklist."
                 linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": status, "BLOQUEIA": bloqueia,
-                               "PRAZO": prazo, "MOTIVO": motivo, "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual")})
+                               "PRAZO": prazo, "MOTIVO": motivo, "DOC_CODIGO": codigo, "DOCUMENTO": nome,
+                               "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual")})
     df = pd.DataFrame(linhas)
     df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
     return df

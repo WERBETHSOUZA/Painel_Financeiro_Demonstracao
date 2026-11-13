@@ -216,7 +216,7 @@ O painel traz também o card **Notas Pendentes de Validação**, colorido pela s
 
 O painel exibe ainda o card de **Status do Faturamento** (Liberado / Bloqueado) com base na situação de crédito consolidada do grupo, refletindo a mesma lógica usada em Situação Cliente.
 
-#### 📌 Resumo Pendências *(só quem está no grupo fixo de mesmo nome)*
+#### ⚠️ Resumo Pendências *(só quem está no grupo fixo de mesmo nome)*
 Acompanhamento por **quantidade** das pendências do Mercado Interno: quatro cartões no padrão do Descontos Contratuais Pendentes (**Descontos Contratuais Pendentes**, **Boletos Não Gerados** prontos para gerar, **Notas Pendentes de Validação** com bloqueantes e validação manual, e **Esperado e Recebido no banco** do dia, em títulos e em R$ (único cartão com valores); os três primeiros passam sozinhos de cliente em cliente, com pausa ao passar o mouse) e, embaixo, o gráfico das notas pendentes de todos os clientes (uma barra por nota, filtro Todas/Bloqueantes/Validação manual, rolagem, e a NF abre o controle de venda no SyncProcess pelo número do controle). Usa `QUERY_PENDENCIAS_NOTAS.sql` e as mesmas regras dos cartões e relatórios de origem.
 
 #### 🔍 Situação Cliente

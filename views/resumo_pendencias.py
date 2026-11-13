@@ -16,8 +16,9 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from services.data_service import carregar_lista_clientes, carregar_recebido_mensal_mi, carregar_recebimento_hoje_mi
-from utils.pendencias import notas_pendentes_todas, url_controle_venda
+from services.data_service import (carregar_grupo_credito_geral, carregar_grupo_credito_saldo_agente, carregar_lista_clientes,
+                                   carregar_recebido_mensal_mi, carregar_recebimento_hoje_mi)
+from utils.pendencias import ESTADO_ROTULO, colunas_documentos, notas_pendentes_todas, url_controle_venda
 from views.contas_receber import _nomes_curtos, formatar_moeda
 from views.relatorio_boleto_nao_gerado import _status_boleto
 from views.relatorio_desconto_financeiro_pendente import resumo_descontos_pendentes
@@ -46,12 +47,17 @@ _CSS = """<style>
 .rp-barra{height:8px;border-radius:4px;background:rgba(128,128,128,0.18);overflow:hidden;margin:6px 0 4px}
 .rp-barra div{height:100%}
 .rp-lista{background:#1e1e2e;border-radius:12px;border-top:4px solid #E24B4A;padding:14px 18px}
-.rp-linha{display:grid;grid-template-columns:78px minmax(0,1.2fr) minmax(0,2fr) 52px 86px;gap:12px;align-items:center;font-size:13px;padding:4px 0}
-.rp-linha a{color:#fff;font-weight:600;text-decoration:none;white-space:nowrap}.rp-linha a:hover{text-decoration:underline;color:#6db3f5}
+.rp-q{display:grid;gap:8px;align-items:center;font-size:13px}
+.rp-qh{font-size:11px;color:#8892a4;text-align:center;line-height:1.2;padding-bottom:6px;border-bottom:1px solid #2a2a3a;align-items:end}
+.rp-q a{color:#fff;font-weight:600;text-decoration:none;white-space:nowrap}.rp-q a:hover{text-decoration:underline;color:#6db3f5}
+.rp-cad{vertical-align:-2px}.rp-cadc{display:flex;align-items:center;justify-content:center}
 .rp-cli{color:#aab2c5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rp-bar{height:12px;border-radius:3px;background:rgba(128,128,128,0.15);overflow:hidden}
-.rp-linha em{font-style:normal;color:#8892a4;text-align:right;white-space:nowrap}
-@media (max-width:640px){.rp-linha{grid-template-columns:70px minmax(0,1fr) 46px}.rp-cli,.rp-linha em:last-child{display:none}}
+.rp-c{height:24px;border-radius:5px;font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:600}
+.rp-c-VENCIDO{background:rgba(226,75,74,.28);color:#f3a3a2}.rp-c-VALIDANDO{background:rgba(55,138,221,.25);color:#8ec2f5}
+.rp-c-NAO_ANEXADO,.rp-c-PENDENTE{background:rgba(156,163,175,.22);color:#d1d5db}
+.rp-c-OK{background:rgba(34,197,94,.16);color:#6fd69a}.rp-c-ND{color:#6b7280;font-weight:400}
+.rp-qr{padding:5px 0;border-bottom:1px solid #26263a}.rp-pz{text-align:right;color:#8892a4;white-space:nowrap}
+@media (max-width:760px){.rp-cli,.rp-pz{display:none}}
 </style>"""
 
 
@@ -212,34 +218,75 @@ def _card_esperado_recebido(df_cr: pd.DataFrame) -> str:
             f'</div></div>')
 
 
+_CADEADO_FECHADO = ('<svg class="rp-cad" viewBox="0 0 16 16" width="14" height="14" aria-label="Crédito bloqueado"><title>Crédito bloqueado</title>'
+                    '<rect x="3" y="7" width="10" height="7" rx="1.5" fill="#E24B4A"/><path d="M5 7V5a3 3 0 0 1 6 0v2" fill="none" '
+                    'stroke="#E24B4A" stroke-width="1.6"/></svg>')
+_CADEADO_ABERTO = ('<svg class="rp-cad" viewBox="0 0 16 16" width="14" height="14" aria-label="Crédito liberado"><title>Crédito liberado</title>'
+                   '<rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="#22c55e" stroke-width="1.5"/>'
+                   '<path d="M5 7V5a3 3 0 0 1 5.6-1.5" fill="none" stroke="#22c55e" stroke-width="1.6"/></svg>')
+
+
+def _credito_por_cliente() -> dict:
+    """Situação de crédito de cada cliente (a mesma do card Situação Documental: a do grupo dele no Grupo de Crédito):
+    {código do agente: True se bloqueado, False se liberado}. Cliente sem situação conhecida fica de fora (sem cadeado)."""
+    try:
+        geral, agentes = carregar_grupo_credito_geral(), carregar_grupo_credito_saldo_agente()
+        if geral is None or agentes is None or geral.empty or agentes.empty:
+            return {}
+        sit = {g: str(v or "").upper() for g, v in zip(geral["GRUPO_CODIGO"], geral["SITUACAO_CLIENTE"])}
+        saida = {}
+        for grupo, agente in zip(agentes["COD_GRUPO"], agentes["COD_AGENTE"]):
+            t = sit.get(grupo, "")
+            if any(x in t for x in ("BLOQ", "INADIMPL", "SUSPENS")):
+                saida[str(int(float(agente)))] = True
+            elif any(x in t for x in ("ATIVO", "OK", "LIBERADO", "NORMAL")):
+                saida[str(int(float(agente)))] = False
+        return saida
+    except Exception:
+        return {}
+
+
 def _grafico_notas(notas, filtro: str) -> str:
+    """Quadro das notas pendentes: uma linha por nota e uma coluna por documento que bloqueia (vermelho = vencido, azul = validando,
+    âmbar = não anexado, verde = OK, traço = a regra não vale para a nota). Aparece só a coluna do documento que tem alguma nota."""
     nomes = _nomes_clientes()
+    credito = _credito_por_cliente()
     d = notas if filtro == "Todas" else notas[notas["TIPO"] == ("BLOQUEANTE" if filtro == "Bloqueantes" else "MANUAL")]
     cabeca = ('<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
               '<span style="color:#e0e0e0;font-size:14px;font-weight:600">Notas pendentes de validação · todos os clientes</span>'
-              '<span style="font-size:11px;color:#8892a4"><span style="color:#ff6b6b">●</span> bloqueante &nbsp;'
-              '<span style="color:#6db3f5">●</span> validação manual</span></div>')
+              f'<span style="font-size:11px;color:#8892a4">{len(d)} nota(s) · só documentos que bloqueiam</span></div>')
     if d.empty:
         return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Nenhuma nota neste filtro.</span></div>'
-    maximo = max(int(d["QTD_DOCS"].max()), 1)
+    cols = colunas_documentos(d)
+    grade = f"grid-template-columns:70px 22px minmax(0,1.25fr) repeat({len(cols)},minmax(0,1fr)) 92px"
+    topo = (f'<div class="rp-q rp-qh" style="{grade}"><span style="text-align:left">NF</span><span class="rp-cadc"></span><span class="rp-cli" style="text-align:left">Cliente</span>'
+            + "".join(f'<span title="{escape(nome, quote=True)}">{escape(nome)}</span>' for _, nome, _ in cols)
+            + '<span class="rp-pz">Prazo</span></div>')
     linhas = ""
-    for i, r in enumerate(d.itertuples(index=False)):
-        cor = _VERMELHO if r.TIPO == "BLOQUEANTE" else _AZUL
+    for r in d.itertuples(index=False):
         cli = nomes.get(str(int(float(r.COD_CLIENTE))), f"Cliente {r.COD_CLIENTE}")
         prazo = r.PRAZO.strftime("%d/%m/%Y") if pd.notna(r.PRAZO) else "—"
+        bloqueado = credito.get(str(int(float(r.COD_CLIENTE))))
+        cad = "" if bloqueado is None else (_CADEADO_FECHADO if bloqueado else _CADEADO_ABERTO)
         url = url_controle_venda(r.CONTROLE)
-        dica = escape(f"{'Bloqueante' if r.TIPO == 'BLOQUEANTE' else 'Validação manual'} · {cli} · {r.CONTROLE} · "
-                      + " · ".join(r.DOCUMENTOS), quote=True)
+        dica = escape(f"{cli} · {r.CONTROLE}", quote=True)
         nf = (f'<a href="{url}" target="_blank" rel="noopener noreferrer" title="{dica}">NF {escape(r.NF)}</a>' if url
               else f'<span style="color:#fff;font-weight:600" title="{dica}">NF {escape(r.NF)}</span>')
-        linhas += (f'<div class="rp-linha">{nf}<span class="rp-cli" title="{escape(cli, quote=True)}">{escape(cli)}</span>'
-                   f'<div class="rp-bar"><div class="an-wipe" style="animation-delay:{min(i, 14) * 45}ms;'
-                   f'width:{r.QTD_DOCS / maximo * 100:.1f}%;height:100%;background:{cor}"></div></div>'
-                   f'<em>{r.QTD_DOCS} doc.</em><em>{prazo}</em></div>')
-    rodape = (f'<div style="height:1px;background:#2a2a3a;margin:8px 0 6px"></div><span style="color:#8892a4;font-size:11px">'
-              f'{len(d)} nota(s) · clique na NF para abrir o controle de venda no SyncProcess · passe o mouse para ver os documentos</span>')
-    return (f'<div class="rp-lista">{cabeca}<div style="max-height:380px;overflow-y:auto;scrollbar-width:thin;'
-            f'scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>{rodape}</div>')
+        celulas = ""
+        for c, nome, _ in cols:
+            e_ = r.ESTADOS.get(c)
+            if e_ is None:
+                celulas += f'<div class="rp-c rp-c-ND" title="{escape(nome, quote=True)}: não se aplica">—</div>'
+            else:
+                celulas += f'<div class="rp-c rp-c-{e_}" title="{escape(nome, quote=True)}">{ESTADO_ROTULO[e_]}</div>'
+        linhas += (f'<div class="rp-q rp-qr" style="{grade}">{nf}<span class="rp-cadc">{cad}</span><span class="rp-cli" title="{escape(cli, quote=True)}">{escape(cli)}</span>'
+                   f'{celulas}<span class="rp-pz">{prazo}</span></div>')
+    legenda = ('<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#8892a4;margin-top:10px">'
+               '<span><span style="color:#E24B4A">●</span> inválido (prazo vencido, bloqueia)</span><span><span style="color:#378ADD">●</span> em validação</span>'
+               '<span><span style="color:#9ca3af">●</span> pendente (sem documento)</span><span><span style="color:#22c55e">●</span> válido</span>'
+               '<span>— a regra não vale para a nota</span><span>' + _CADEADO_FECHADO + ' crédito bloqueado · ' + _CADEADO_ABERTO + ' crédito liberado</span><span>clique na NF para abrir o controle de venda no SyncProcess</span></div>')
+    return (f'<div class="rp-lista">{cabeca}{topo}<div style="max-height:420px;overflow-y:auto;scrollbar-width:thin;'
+            f'scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>{legenda}</div>')
 
 
 def render(df_cr: pd.DataFrame) -> None:

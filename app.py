@@ -478,7 +478,7 @@ if not eh_admin:
     paineis = _menu_sem_teste
 # Resumo Pendências: só quem foi incluído no grupo fixo de mesmo nome (tela Acessos) vê o item, até o administrador
 if permissoes.tem_resumo_pendencias(usuario, _dados_perm):
-    paineis = [("📌", "Resumo Pendências")] + list(paineis)
+    paineis = [("⚠️", "Resumo Pendências")] + list(paineis)
 paginas_relatorios_visiveis = {k: v for k, v in paginas_relatorios_visiveis.items() if k not in _desativados}
 st.session_state["_relatorios_visiveis"] = list(paginas_relatorios_visiveis)
 PAINEIS_FIXOS = ["Acessos"] if eh_admin else []  # abre pelo botão "Admin" ao lado de Sair, fora da lista do menu
@@ -567,7 +567,8 @@ def _pagina_inicial_relatorios():
 
 # ── Estado inicial ────────────────────────────────────────────────────────────
 if "_painel_ativo" not in st.session_state:
-    st.session_state["_painel_ativo"] = None
+    # quem está no grupo Resumo Pendências abre direto nele (só ao entrar; depois navega normalmente)
+    st.session_state["_painel_ativo"] = "Resumo Pendências" if permissoes.tem_resumo_pendencias(usuario, _dados_perm) else None
 
 # ── Identificação na barra recolhida: globo da logo + iniciais de quem entrou ─────────────────────────────
 @st.cache_resource
