@@ -164,6 +164,10 @@ def carregar_notas_pendentes_validacao():
                 linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": status, "BLOQUEIA": bloqueia,
                                "PRAZO": prazo, "MOTIVO": motivo, "DOC_CODIGO": codigo, "DOCUMENTO": nome,
                                "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual")})
+            # o Pedido de venda (não bloqueia) aparece como Válido, gerado automaticamente
+            linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": 3, "BLOQUEIA": 0, "PRAZO": pd.NaT,
+                           "MOTIVO": "Pedido de venda gerado automaticamente pelo MEGA/SyncProcess", "DOC_CODIGO": "PEDVENDA",
+                           "DOCUMENTO": "Pedido de venda", "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual")})
     df = pd.DataFrame(linhas)
     df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
     return df

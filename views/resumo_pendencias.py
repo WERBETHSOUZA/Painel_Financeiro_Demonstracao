@@ -19,7 +19,7 @@ import streamlit as st
 
 from services.data_service import (carregar_controles_abertos_mi, carregar_grupo_credito_geral, carregar_grupo_credito_saldo_agente,
                                    carregar_lista_clientes, carregar_recebido_mensal_mi, carregar_recebimento_hoje_mi)
-from utils.pendencias import ESTADO_ROTULO, colunas_documentos, notas_pendentes_todas, url_controle_venda
+from utils.pendencias import ESTADO_ROTULO, colunas_documentos, notas_pendentes_todas, url_busca_controles, url_controle_venda
 from views.contas_receber import _nomes_curtos, formatar_moeda
 from views.relatorio_boleto_nao_gerado import _status_boleto
 from views.relatorio_desconto_financeiro_pendente import resumo_descontos_pendentes
@@ -299,26 +299,19 @@ def _html_para_desbloquear(df) -> str:
         return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Não foi possível consultar agora.</span></div>'
     if df.empty:
         return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Nenhum cliente nesta situação.</span></div>'
-    grade = "grid-template-columns:22px minmax(0,1.6fr) 80px minmax(0,1.4fr) 140px 70px"
+    grade = "grid-template-columns:22px minmax(0,2fr) 90px 150px 80px"
     topo = (f'<div class="rp-q rp-qh" style="{grade}"><span></span><span style="text-align:left">Cliente</span><span class="rp-pz" style="text-align:left">Código</span>'
-            '<span style="text-align:left">Controles abertos (NF)</span><span style="text-align:left">Situação do crédito</span><span class="rp-pz">Controles</span></div>')
+            '<span style="text-align:left">Situação do crédito</span><span class="rp-pz">Controles</span></div>')
     linhas = ""
     for r in df.itertuples(index=False):
-        links = ""
-        for controle, nf in r.CONTROLES[:3]:
-            url = url_controle_venda(controle)
-            rot = escape(f"NF {nf}" if nf else controle)
-            links += (f'<a href="{url}" target="_blank" rel="noopener noreferrer" title="{escape(controle, quote=True)}" '
-                      f'style="color:#fff;font-weight:600;text-decoration:none;margin-right:10px">{rot}</a>') if url else f'<span style="margin-right:10px">{rot}</span>'
-        if len(r.CONTROLES) > 3:
-            links += f'<span style="color:#8892a4">+{len(r.CONTROLES) - 3}</span>'
         linhas += (f'<div class="rp-q rp-qr" style="{grade}"><span class="rp-cadc">{_CADEADO_FECHADO}</span>'
-                   f'<span class="rp-cli" title="{escape(r.NOME, quote=True)}">{escape(r.NOME)}</span>'
-                   f'<span class="rp-pz" style="text-align:left">{escape(r.COD)}</span><span style="white-space:nowrap;overflow:hidden">{links}</span>'
+                   f'<span class="rp-cli" title="Abrir os controles de venda de {escape(r.NOME, quote=True)} no SyncProcess">'
+                   f'<a href="{url_busca_controles(r.NOME)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">{escape(r.NOME)}</a></span>'
+                   f'<span class="rp-pz" style="text-align:left">{escape(r.COD)}</span>'
                    f'<span style="color:#f3a3a2;font-size:12px">{escape(r.SITUACAO.capitalize())}</span><span class="rp-pz">{len(r.CONTROLES)}</span></div>')
     rodape = ('<div style="font-size:11px;color:#8892a4;margin-top:10px;line-height:1.6">Sai da lista quando o grupo for liberado no Grupo de Crédito, '
-              'quando o controle fechar ou quando surgir pendência em documento que bloqueia (aí vai para o quadro de notas). Clique na NF para '
-              'abrir o controle de venda no SyncProcess. Lista de análise: o bloqueio pode ser de crédito (limite, inadimplência), não só documental.</div>')
+              'quando o controle fechar ou quando surgir pendência em documento que bloqueia (aí vai para o quadro de notas). Clique no nome do '
+              'cliente para ver os controles dele no SyncProcess. Lista de análise: o bloqueio pode ser de crédito (limite, inadimplência), não só documental.</div>')
     return (f'<div class="rp-lista" style="border-top-color:#F59E0B">{cabeca}{topo}<div style="max-height:320px;overflow-y:auto;'
             f'scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>{rodape}</div>')
 
@@ -331,7 +324,7 @@ def _grafico_notas(notas, filtro: str) -> str:
     d = notas if filtro == "Todas" else notas[notas["TIPO"] == ("BLOQUEANTE" if filtro == "Bloqueantes" else "MANUAL")]
     cabeca = ('<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
               '<span style="color:#e0e0e0;font-size:14px;font-weight:600">Notas pendentes de validação · todos os clientes</span>'
-              f'<span style="font-size:11px;color:#8892a4">{len(d)} nota(s) · só documentos que bloqueiam</span></div>')
+              f'<span style="font-size:11px;color:#8892a4">{len(d)} nota(s) · documentos que bloqueiam e o pedido de venda</span></div>')
     if d.empty:
         return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Nenhuma nota neste filtro.</span></div>'
     cols = colunas_documentos(d)
@@ -356,12 +349,13 @@ def _grafico_notas(notas, filtro: str) -> str:
                 celulas += f'<div class="rp-c rp-c-ND" title="{escape(nome, quote=True)}: não se aplica">—</div>'
             else:
                 celulas += f'<div class="rp-c rp-c-{e_}" title="{escape(nome, quote=True)}">{ESTADO_ROTULO[e_]}</div>'
-        linhas += (f'<div class="rp-q rp-qr" style="{grade}">{nf}<span class="rp-cadc">{cad}</span><span class="rp-cli" title="{escape(cli, quote=True)}">{escape(cli)}</span>'
+        linhas += (f'<div class="rp-q rp-qr" style="{grade}">{nf}<span class="rp-cadc">{cad}</span><span class="rp-cli" title="Abrir os controles de venda de {escape(cli, quote=True)} no SyncProcess">'
+                   f'<a href="{url_busca_controles(cli)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">{escape(cli)}</a></span>'
                    f'{celulas}<span class="rp-pz">{prazo}</span></div>')
     legenda = ('<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#8892a4;margin-top:10px">'
                '<span><span style="color:#E24B4A">●</span> inválido (prazo vencido, bloqueia)</span><span><span style="color:#378ADD">●</span> em validação</span>'
                '<span><span style="color:#9ca3af">●</span> pendente (sem documento)</span><span><span style="color:#22c55e">●</span> válido</span>'
-               '<span>— a regra não vale para a nota</span><span>' + _CADEADO_FECHADO + ' crédito bloqueado · ' + _CADEADO_ABERTO + ' crédito liberado</span><span>clique na NF para abrir o controle de venda no SyncProcess</span></div>')
+               '<span>— a regra não vale para a nota</span><span>' + _CADEADO_FECHADO + ' crédito bloqueado · ' + _CADEADO_ABERTO + ' crédito liberado</span><span>clique na NF para abrir o controle de venda e no nome do cliente para ver os controles dele no SyncProcess</span></div>')
     return (f'<div class="rp-lista">{cabeca}{topo}<div style="max-height:420px;overflow-y:auto;scrollbar-width:thin;'
             f'scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>{legenda}</div>')
 

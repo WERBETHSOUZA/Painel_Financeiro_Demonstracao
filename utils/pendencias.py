@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from html import escape
+from urllib.parse import quote_plus
 
 import pandas as pd
 
@@ -112,9 +113,9 @@ _ABERTOS = (0, 1, 2, 6)   # status de pendência ainda aberta (3 = regularizada:
 _GRAVIDADE = {"VENCIDO": 4, "VALIDANDO": 3, "NAO_ANEXADO": 2, "PENDENTE": 1, "OK": 0}
 # nomes iguais aos da Gestão documental do SyncProcess: Pendente (sem documento), Em validação, Inválido (prazo vencido, bloqueio ativo) e Válido
 ESTADO_ROTULO = {"VENCIDO": "Inválido", "VALIDANDO": "Em validação", "NAO_ANEXADO": "Pendente", "PENDENTE": "Pendente", "OK": "Válido"}
-# documentos que aparecem como coluna, nesta ordem: (código no SyncProcess, nome na coluna larga, sigla na coluna estreita)
+# documentos que aparecem como coluna (os que bloqueiam e o Pedido de venda, que aparece Válido), nesta ordem: (código no SyncProcess, nome na coluna larga, sigla na coluna estreita)
 _DOCS_ORDEM = [("CNH", "CNH do motorista", "CNH"), ("NFCANHOTO", "NF com canhoto", "NF"), ("CARTATEMP", "Carta de temperatura", "Cart."),
-               ("ACEITEPED", "Aceite do pedido", "Ac."), ("PEDCOMPRA", "Pedido de compra", "Ped.")]
+               ("PEDVENDA", "Pedido de venda", "PV"), ("ACEITEPED", "Aceite do pedido", "Ac."), ("PEDCOMPRA", "Pedido de compra", "Ped.")]
 
 
 def _estado_documento(status, bloqueia) -> str:
@@ -198,6 +199,14 @@ def notas_pendentes_todas():
 
 
 URL_CONTROLE_VENDA = "https://syncprocess.corporativo.demo.com.br/gestao-documental/controle-venda/{numero}/dados/"
+
+
+URL_BUSCA_CONTROLES = "https://syncprocess.corporativo.demo.com.br/gestao-documental/controle-venda/?q={busca}"
+
+
+def url_busca_controles(nome):
+    """Link da lista de controles de venda do SyncProcess já pesquisada pelo nome do cliente (?q=MARIA+VITORIA+TELES+LIMA)."""
+    return URL_BUSCA_CONTROLES.format(busca=quote_plus(str(nome).strip()))
 
 
 def url_controle_venda(controle):
