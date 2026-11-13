@@ -189,6 +189,27 @@ def carregar_controles_abertos_mi():
 
 
 @st.cache_data(show_spinner=False)
+def carregar_documentos_sem_anexo():
+    """Documentos que bloqueiam e ainda estão sem anexo (COD_CLIENTE, CONTROLE, NF, DOC_CODIGO, DOCUMENTO, PRAZO, BLOQUEIA), inventados:
+    a maioria com prazo nos próximos dias e alguns com o prazo já passado e sem bloqueio, para o painel mostrar os dois blocos."""
+    hoje = pd.Timestamp.now().normalize()
+    rng = np.random.RandomState(nv.SEMENTE + 42)
+    docs = [("CNH", "CNH do motorista"), ("NFCANHOTO", "Nota fiscal com canhoto"), ("CARTATEMP", "Carta de temperatura")]
+    linhas, nf = [], 61700
+    for cod, n, dias in [(1102, 3, (0, 6)), (1104, 2, (1, 4)), (1302, 3, (2, 7)), (1101, 2, (-30, -20)), (1103, 1, (-12, -9))]:
+        for _ in range(n):
+            nf += int(rng.randint(3, 25))
+            controle = f"CTV-2026-{nf + 3000:06d}"
+            prazo = hoje + pd.Timedelta(days=int(rng.randint(dias[0], dias[1] + 1)), hours=int(rng.randint(9, 18)))
+            for i in rng.choice(len(docs), size=int(rng.randint(1, 4)), replace=False):
+                linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "DOC_CODIGO": docs[i][0], "DOCUMENTO": docs[i][1],
+                               "PRAZO": prazo, "BLOQUEIA": 0})
+    df = pd.DataFrame(linhas)
+    df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
+    return df
+
+
+@st.cache_data(show_spinner=False)
 def carregar_pendencias_bloqueantes():
     """Notas com pendência por cliente (COD_CLIENTE, QTD_BLOQUEANTES, PRAZO_BLOQUEIO, QTD_MANUAL, PRAZO_MANUAL), calculadas das
     mesmas notas fictícias do gráfico, para o card e o gráfico sempre baterem."""
