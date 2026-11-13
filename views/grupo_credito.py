@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 from components.buttons import botao_exportar_excel, botoes_acao_row
 from components.cards import card_html, render_cards_row, render_tabela_html, situacao_faturamento
+from utils.pendencias import card_pendencias
 from utils.exporters import exportar_excel
 from utils.mercado import sufixo_mercado
 from utils.imagem_email import gerar_imagem_resumo_titulos
@@ -324,6 +325,8 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
         _cartao("Status", _sit_fat_val, subtitulo=_sit_fat_sub, cor_borda=_sit_fat_cor),
         _ADTO,
     ]
+    if sufixo_mercado(_titulos_sit_fat) != " - Mercado Externo":   # notas pendentes de validação: só Mercado Interno
+        _cards_gc.insert(_cards_gc.index(_ADTO), card_pendencias(_cods_sit_fat, _cartao))
     _linhas_total = -(-len(_cards_gc) // 4)
     _base, _extra = divmod(len(_cards_gc), _linhas_total)
     _tamanhos = [_base + (1 if k < _extra else 0) for k in range(_linhas_total)]

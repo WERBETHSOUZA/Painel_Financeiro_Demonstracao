@@ -5,6 +5,7 @@ import pandas as pd
 from functools import partial
 from components.buttons import botao_exportar_excel, botoes_acao_row
 from components.cards import card_html, render_cards_row, render_tabela_html, situacao_faturamento, tamanho_auto
+from utils.pendencias import card_pendencias, html_notas_pendentes
 from services.data_service import carregar_regra_desconto_cliente
 from utils.exporters import exportar_excel
 from utils.mercado import sufixo_mercado
@@ -395,7 +396,8 @@ def render(
         _card_sc("Situação Documental", situacao_cliente.capitalize(), cor_borda=cor_situacao),
         _card_status,
     ]
-    if not _so_externo:   # a regra de desconto só existe no Mercado Interno
+    if not _so_externo:   # a regra de desconto e as notas pendentes de validação só existem no Mercado Interno
+        _slots.append(card_pendencias([codigo_agente], _card_sc))
         _regra_desc = _regra_do_cliente(df_cliente, codigo_agente)
         _slots.append(_card_sc("Regra de Desconto", _regra_desc, cor_borda="#8B5CF6"))   # numa linha só: a fonte se ajusta
 
@@ -445,7 +447,12 @@ def render(
 
     # ── Aging de vencimento (barras) ─────────────────────────────────────────
     st.subheader("Aging de Vencimento")
-    col_aging, col_sit = st.columns([1, 0.9])
+    # Cliente do Mercado Interno com nota pendente de validação: o gráfico das notas entra numa terceira coluna, ao lado do aging
+    _html_pend = None if _so_externo else html_notas_pendentes(codigo_agente)
+    if _html_pend:
+        col_aging, col_sit, col_pend = st.columns([1, 0.9, 0.9])
+    else:
+        col_aging, col_sit = st.columns([1, 0.9])
     _sit_col = df_cliente["SITUACAO"] if "SITUACAO" in df_cliente.columns else pd.Series(dtype=object)
     qtd_titulos_a_vencer = int((_sit_col == "A VENCER").sum())
 
@@ -457,6 +464,9 @@ def render(
     with col_sit:
         if not df_cliente.empty:
             st.html(_html_situacao_titulos(total_a_vencer, total_vencido, qtd_titulos_a_vencer, qtd_titulos_vencidos))
+    if _html_pend:
+        with col_pend:
+            st.html(_html_pend)
 
     st.divider()
 

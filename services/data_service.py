@@ -134,6 +134,53 @@ def carregar_historico_pagamentos_me(agentes: tuple) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def carregar_notas_pendentes_validacao():
+    """Pendências das notas bloqueadas ou em validação manual (uma linha por documento), inventadas: o cliente 1102 tem 3 notas
+    bloqueantes, o 1104 tem 2 em validação manual e o 1302 tem 2 bloqueantes e 3 em validação manual."""
+    hoje = pd.Timestamp(date.today())
+    rng = np.random.RandomState(nv.SEMENTE + 40)
+    docs = ["CNH do motorista", "Carta de temperatura", "PTV", "Nota fiscal com canhoto", "Relatório de Expedição", "Dados do motorista e veículo"]
+    linhas, nf = [], 61200
+    for cod, tipo, n in [(1102, "bloq", 3), (1104, "manual", 2), (1302, "bloq", 2), (1302, "manual", 3)]:
+        for _ in range(n):
+            nf += int(rng.randint(3, 30))
+            controle = f"CTV-2026-{nf + 3000:06d}"
+            escolhidos = list(rng.choice(docs, size=int(rng.randint(1, 5)), replace=False))
+            prazo = hoje + pd.Timedelta(days=int(rng.randint(-4, -1)) if tipo == "bloq" else int(rng.randint(1, 8)))
+            for k, d in enumerate(escolhidos):
+                if k == 0 and tipo == "bloq":
+                    status, bloqueia, motivo = 2, 1, f"Documento {d} aguardando conclusão da validação OCR/revisão. Prazo documental vencido."
+                elif k == 0:
+                    status, bloqueia, motivo = 1, 0, f"Documento {d} aguardando conclusão da validação OCR/revisão."
+                else:
+                    status, bloqueia, motivo = 0, 0, f"Documento obrigatório {d} ainda não foi anexado ao checklist."
+                linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": status, "BLOQUEIA": bloqueia,
+                               "PRAZO": prazo, "MOTIVO": motivo, "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual")})
+    df = pd.DataFrame(linhas)
+    df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def carregar_pendencias_bloqueantes():
+    """Notas com pendência por cliente (COD_CLIENTE, QTD_BLOQUEANTES, PRAZO_BLOQUEIO, QTD_MANUAL, PRAZO_MANUAL), calculadas das
+    mesmas notas fictícias do gráfico, para o card e o gráfico sempre baterem."""
+    d = carregar_notas_pendentes_validacao()
+    notas = d.groupby(["COD_CLIENTE", "CONTROLE", "NF"], as_index=False).agg(
+        bloq=("NOTA_BLOQ", "max"), manual=("NOTA_MANUAL", "max"))
+    saida = []
+    for cod, g in notas.groupby("COD_CLIENTE"):
+        linhas = d[d["COD_CLIENTE"] == cod]
+        bl = linhas[linhas["BLOQUEIA"] == 1]["PRAZO"].min()
+        ma = linhas[(linhas["STATUS"] == 1) & (linhas["NOTA_BLOQ"] == 0)]["PRAZO"].min()
+        saida.append({"COD_CLIENTE": cod, "QTD_BLOQUEANTES": int((g["bloq"] == 1).sum()), "PRAZO_BLOQUEIO": bl,
+                      "QTD_MANUAL": int(((g["bloq"] == 0) & (g["manual"] == 1)).sum()), "PRAZO_MANUAL": ma})
+    out = pd.DataFrame(saida)
+    out["COD_CLIENTE"] = out["COD_CLIENTE"].astype("Int64")
+    return out
+
+
+@st.cache_data(show_spinner=False)
 def carregar_regra_desconto_cliente(codigo: int):
     cr = _base()["contas_receber"]
     x = cr[(cr["COD_CLIENTE"] == int(codigo)) & cr["TIPO_REGRA"].notna()]
