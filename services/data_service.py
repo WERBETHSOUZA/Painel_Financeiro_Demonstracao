@@ -144,7 +144,7 @@ def carregar_notas_pendentes_validacao():
     docs = [("CNH", "CNH do motorista"), ("NFCANHOTO", "Nota fiscal com canhoto"), ("CARTATEMP", "Carta de temperatura"),
             ("ACEITEPED", "Aceite do Pedido de Venda")]
     linhas, nf = [], 61200
-    for cod, tipo, n in [(1102, "bloq", 3), (1104, "manual", 2), (1302, "bloq", 2), (1302, "manual", 3)]:
+    for cod, tipo, n in [(1102, "bloq", 3), (1104, "manual", 2), (1302, "bloq", 2), (1302, "manual", 3), (1104, "avencer", 2), (1302, "avencer", 1)]:
         for _ in range(n):
             nf += int(rng.randint(3, 30))
             controle = f"CTV-2026-{nf + 3000:06d}"
@@ -153,7 +153,9 @@ def carregar_notas_pendentes_validacao():
             prazo = hoje + pd.Timedelta(days=int(rng.randint(-4, -1)) if tipo == "bloq" else int(rng.randint(1, 8)))
             for k, i in enumerate(idx):
                 codigo, nome = docs[i]
-                if k == 0 and tipo == "bloq":
+                if tipo == "avencer":
+                    status, bloqueia, motivo = 0, 0, f"Documento obrigatório {nome} ainda não foi anexado ao checklist."
+                elif k == 0 and tipo == "bloq":
                     status, bloqueia, motivo = 2, 1, f"Documento {nome} ainda não foi anexado. Prazo documental vencido."
                 elif k == 0:
                     status, bloqueia, motivo = 1, 0, f"Documento {nome} aguardando conclusão da validação OCR/revisão."
@@ -163,11 +165,12 @@ def carregar_notas_pendentes_validacao():
                     status, bloqueia, motivo = 0, 0, f"Documento obrigatório {nome} ainda não foi anexado ao checklist."
                 linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": status, "BLOQUEIA": bloqueia,
                                "PRAZO": prazo, "MOTIVO": motivo, "DOC_CODIGO": codigo, "DOCUMENTO": nome,
-                               "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual")})
+                               "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual"), "NOTA_AVENCER": int(tipo == "avencer")})
             # o Pedido de venda (não bloqueia) aparece como Válido, gerado automaticamente
             linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": 3, "BLOQUEIA": 0, "PRAZO": pd.NaT,
                            "MOTIVO": "Pedido de venda gerado automaticamente pelo MEGA/SyncProcess", "DOC_CODIGO": "PEDVENDA",
-                           "DOCUMENTO": "Pedido de venda", "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual")})
+                           "DOCUMENTO": "Pedido de venda", "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual"),
+                       "NOTA_AVENCER": int(tipo == "avencer")})
     df = pd.DataFrame(linhas)
     df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
     return df
@@ -183,27 +186,6 @@ def carregar_controles_abertos_mi():
         for _ in range(n):
             nf += int(rng.randint(3, 25))
             linhas.append({"COD_CLIENTE": cod, "CONTROLE": f"CTV-2026-{nf + 3000:06d}", "NF": str(nf)})
-    df = pd.DataFrame(linhas)
-    df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
-    return df
-
-
-@st.cache_data(show_spinner=False)
-def carregar_documentos_sem_anexo():
-    """Documentos que bloqueiam e ainda estão sem anexo (COD_CLIENTE, CONTROLE, NF, DOC_CODIGO, DOCUMENTO, PRAZO, BLOQUEIA), inventados:
-    a maioria com prazo nos próximos dias e alguns com o prazo já passado e sem bloqueio, para o painel mostrar os dois blocos."""
-    hoje = pd.Timestamp.now().normalize()
-    rng = np.random.RandomState(nv.SEMENTE + 42)
-    docs = [("CNH", "CNH do motorista"), ("NFCANHOTO", "Nota fiscal com canhoto"), ("CARTATEMP", "Carta de temperatura")]
-    linhas, nf = [], 61700
-    for cod, n, dias in [(1102, 3, (0, 6)), (1104, 2, (1, 4)), (1302, 3, (2, 7)), (1101, 2, (-30, -20)), (1103, 1, (-12, -9))]:
-        for _ in range(n):
-            nf += int(rng.randint(3, 25))
-            controle = f"CTV-2026-{nf + 3000:06d}"
-            prazo = hoje + pd.Timedelta(days=int(rng.randint(dias[0], dias[1] + 1)), hours=int(rng.randint(9, 18)))
-            for i in rng.choice(len(docs), size=int(rng.randint(1, 4)), replace=False):
-                linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "DOC_CODIGO": docs[i][0], "DOCUMENTO": docs[i][1],
-                               "PRAZO": prazo, "BLOQUEIA": 0})
     df = pd.DataFrame(linhas)
     df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
     return df

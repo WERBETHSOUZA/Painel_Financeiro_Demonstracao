@@ -140,10 +140,16 @@ def _agrupar_notas(x: pd.DataFrame) -> pd.DataFrame:
         bloq = int(pd.to_numeric(g["NOTA_BLOQ"], errors="coerce").max()) == 1
         st_g = pd.to_numeric(g["STATUS"], errors="coerce")
         abertas = g[st_g.isin(_ABERTOS)]
+        manual = int(pd.to_numeric(g["NOTA_MANUAL"], errors="coerce").max()) == 1
         if bloq:
             ref = abertas[pd.to_numeric(abertas["BLOQUEIA"], errors="coerce") == 1]
-        else:
+            tipo = "BLOQUEANTE"
+        elif manual:
             ref = abertas[pd.to_numeric(abertas["STATUS"], errors="coerce") == 1]
+            tipo = "MANUAL"
+        else:   # nota A VENCER: só documento sem anexo, com prazo ainda aberto (sem anexo até o prazo, bloqueia)
+            ref = abertas[pd.to_numeric(abertas["STATUS"], errors="coerce") == 0]
+            tipo = "A_VENCER"
         # nome do tipo de documento (a regra); o texto do motivo só como reserva
         nomes_g = g["DOCUMENTO"] if "DOCUMENTO" in g.columns else g["MOTIVO"].map(_nome_documento)
         codigos_g = g["DOC_CODIGO"] if "DOC_CODIGO" in g.columns else nomes_g
@@ -154,14 +160,14 @@ def _agrupar_notas(x: pd.DataFrame) -> pd.DataFrame:
             if _GRAVIDADE[e_] >= _GRAVIDADE.get(estados.get(c), -1):
                 estados[c] = e_
         docs = list(dict.fromkeys(str(n) for n in nomes_g[st_g.isin(_ABERTOS)]))
-        linhas.append({"COD_CLIENTE": cod, "NF": str(nf), "CONTROLE": str(controle), "TIPO": "BLOQUEANTE" if bloq else "MANUAL",
+        linhas.append({"COD_CLIENTE": cod, "NF": str(nf), "CONTROLE": str(controle), "TIPO": tipo,
                        "QTD_DOCS": len(abertas), "PRAZO": pd.to_datetime(ref["PRAZO"], errors="coerce").min(), "DOCUMENTOS": docs,
                        "ESTADOS": estados, "NOMES": nomes})
     cols = ["COD_CLIENTE", "NF", "CONTROLE", "TIPO", "QTD_DOCS", "PRAZO", "DOCUMENTOS", "ESTADOS", "NOMES"]
     out = pd.DataFrame(linhas, columns=cols)
     if out.empty:
         return out
-    out["_ordem"] = (out["TIPO"] != "BLOQUEANTE").astype(int)
+    out["_ordem"] = out["TIPO"].map({"BLOQUEANTE": 0, "MANUAL": 1, "A_VENCER": 2})
     return out.sort_values(["_ordem", "PRAZO", "NF"]).drop(columns="_ordem").reset_index(drop=True)
 
 
@@ -228,6 +234,8 @@ def html_notas_pendentes(codigo):
     na bolinha para ver o documento; a NF abre o controle de venda no SyncProcess. None se não há nota pendente ou o banco não
     respondeu (a tela então não mostra o painel)."""
     notas = notas_pendentes_do_cliente(codigo)
+    if notas is not None:
+        notas = notas[notas["TIPO"] != "A_VENCER"].reset_index(drop=True)   # o card e este painel só contam bloqueante e validação manual
     if notas is None or notas.empty:
         return None
     cols = colunas_documentos(notas)
