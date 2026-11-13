@@ -17,7 +17,7 @@ from services.data_service import (
     carregar_adiantamento_saldo_agente, carregar_variacao_cambial_me,
 )
 from components import rodape_lateral
-from views import inconsistencias, relatorios, contas_receber, relatorio_contas_apagar, grupo_credito, situacao_cliente, boletos_dda, adiantamentos, contas_receber_painel, relatorio_contas_receber, relatorio_contas_receber_mi, relatorio_fretes_mot_matriz_filial, faturamento_cliente_grupo, relatorio_desconto_financeiro_pendente, relatorio_descontos_operacionais_mi, relatorio_recebimentos, relatorio_boleto_nao_gerado, relatorio_grupos_credito, relatorio_variacao_cambial_me, acessos, faturamento_estado, visao_geral_comercial
+from views import inconsistencias, relatorios, contas_receber, relatorio_contas_apagar, grupo_credito, situacao_cliente, boletos_dda, adiantamentos, contas_receber_painel, relatorio_contas_receber, relatorio_contas_receber_mi, relatorio_fretes_mot_matriz_filial, faturamento_cliente_grupo, relatorio_desconto_financeiro_pendente, relatorio_descontos_operacionais_mi, relatorio_recebimentos, relatorio_boleto_nao_gerado, relatorio_grupos_credito, relatorio_variacao_cambial_me, acessos, faturamento_estado, visao_geral_comercial, resumo_pendencias
 
 
 def _pagina_aprovadores():
@@ -476,6 +476,9 @@ if not eh_admin:
         else:
             _menu_sem_teste.append(_item)
     paineis = _menu_sem_teste
+# Resumo Pendências: só quem foi incluído no grupo fixo de mesmo nome (tela Acessos) vê o item, até o administrador
+if permissoes.tem_resumo_pendencias(usuario, _dados_perm):
+    paineis = [("📌", "Resumo Pendências")] + list(paineis)
 paginas_relatorios_visiveis = {k: v for k, v in paginas_relatorios_visiveis.items() if k not in _desativados}
 st.session_state["_relatorios_visiveis"] = list(paginas_relatorios_visiveis)
 PAINEIS_FIXOS = ["Acessos"] if eh_admin else []  # abre pelo botão "Admin" ao lado de Sair, fora da lista do menu
@@ -635,15 +638,15 @@ with st.sidebar:
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarUserContent"] { padding-left: 0 !important; padding-right: 0 !important; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarContent"] { padding-left: 0 !important; padding-right: 0 !important; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarUserContent"] [data-testid="stLayoutWrapper"] { width: 100% !important; justify-content: center !important; }
-        section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"]:not(:has(.ibc-rail-id)):not(.st-key-nav_hub_relatorios):not(.st-key-admin_lateral):not(.st-key-sair_lateral):not(:has([data-testid="stPopover"])):not(:has(> iframe[height="0"])) { display: none !important; }
+        section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"]:not(:has(.ibc-rail-id)):not(.st-key-nav_hub_relatorios):not(.st-key-nav_resumo_pendencias):not(.st-key-admin_lateral):not(.st-key-sair_lateral):not(:has([data-testid="stPopover"])):not(:has(> iframe[height="0"])) { display: none !important; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stHorizontalBlock"] { flex-direction: column !important; gap: 0.5rem !important; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarHeader"] > *:not([data-testid="stSidebarCollapseButton"]) { display: none !important; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarCollapseButton"] { transform: rotate(180deg); margin: 0 auto !important; }
-        section[data-testid="stSidebar"][data-ibc-rail="1"] .st-key-nav_hub_relatorios button p,
+        section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button p,
         section[data-testid="stSidebar"][data-ibc-rail="1"] .st-key-admin_lateral button p,
         section[data-testid="stSidebar"][data-ibc-rail="1"] .st-key-sair_lateral button p,
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stPopover"] button p { font-size: 0 !important; }
-        section[data-testid="stSidebar"][data-ibc-rail="1"] .st-key-nav_hub_relatorios button p::before,
+        section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button p::before,
         section[data-testid="stSidebar"][data-ibc-rail="1"] .st-key-admin_lateral button p::before,
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stPopover"] button p::before { content: attr(data-ico); font-size: 1.35rem; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stPopover"] button [data-testid="stIconMaterial"] { display: none !important; }
@@ -695,23 +698,23 @@ with st.sidebar:
             border: 1px solid #4A7FB5 !important;
             color: #ffffff !important;
         }
-        .st-key-nav_hub_relatorios button {
+        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button {
             border: 1px solid rgba(250, 250, 250, 0.2);
             justify-content: center !important;
         }
-        .st-key-nav_hub_relatorios button > div {
+        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button > div {
             width: 100%;
             justify-content: center !important;
         }
-        .st-key-nav_hub_relatorios button [data-testid="stMarkdownContainer"],
-        .st-key-nav_hub_relatorios button p {
+        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button [data-testid="stMarkdownContainer"],
+        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button p {
             text-align: center !important;
             width: 100%;
         }
-        .st-key-nav_hub_relatorios button[data-testid="stBaseButton-secondary"] {
+        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button[data-testid="stBaseButton-secondary"] {
             background: transparent !important;
         }
-        .st-key-nav_hub_relatorios button[data-testid="stBaseButton-secondary"]:hover {
+        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button[data-testid="stBaseButton-secondary"]:hover {
             border-color: rgba(250, 250, 250, 0.45) !important;
         }
     </style>
@@ -820,7 +823,8 @@ with st.sidebar:
                             _resetar_filtros(nome_completo)
         else:
             icone, nome_painel = item
-            if st.button(f"{icone} {nome_painel}", width="stretch", key=f"nav_{nome_painel}",
+            if st.button(f"{icone} {nome_painel}", width="stretch",
+                         key="nav_resumo_pendencias" if nome_painel == "Resumo Pendências" else f"nav_{nome_painel}",   # chave fixa: o menu recolhido mostra só o ícone
                          type="primary" if painel_ativo_menu == nome_painel else "secondary"):
                 if st.session_state["_painel_ativo"] != nome_painel:
                     _resetar_filtros(nome_painel)
@@ -850,7 +854,7 @@ with st.sidebar:
       const seg = (window.Intl && Intl.Segmenter) ? new Intl.Segmenter('pt', { granularity: 'grapheme' }) : null;
       function marcaIcones() {
         const s = side(); if (!s) return;
-        s.querySelectorAll('.st-key-nav_hub_relatorios button, .st-key-admin_lateral button, .st-key-sair_lateral button, [data-testid="stPopover"] button').forEach(function (b) {
+        s.querySelectorAll(':is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button, .st-key-admin_lateral button, .st-key-sair_lateral button, [data-testid="stPopover"] button').forEach(function (b) {
           const p = b.querySelector('p'); if (!p) return;
           const t = (p.textContent || '').trim();
           if (!b.title) b.title = t;
@@ -1014,6 +1018,11 @@ with st.container():
             df_agentes_vgc = carregar_grupo_credito_saldo_agente()
             df_geral_vgc = carregar_grupo_credito_geral()
         visao_geral_comercial.render(df_cr_vgc, df_agentes_vgc, df_geral_vgc)
+
+    elif painel_atual == "Resumo Pendências":
+        with st.spinner("Carregando dados..."):
+            df_cr_rp = carregar_contas_receber()
+        resumo_pendencias.render(df_cr_rp)
 
     elif painel_atual == "Tesouraria > Recebimento por Banco":
         relatorio_recebimentos.render()

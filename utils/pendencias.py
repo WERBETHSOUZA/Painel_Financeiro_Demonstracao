@@ -108,28 +108,52 @@ def _nome_documento(motivo) -> str:
     return t if len(t) <= 48 else t[:47] + "…"
 
 
+def _agrupar_notas(x: pd.DataFrame) -> pd.DataFrame:
+    """Uma linha por nota (cliente + controle + NF) a partir das pendências de `x`: COD_CLIENTE, NF, CONTROLE, TIPO
+    (BLOQUEANTE/MANUAL), QTD_DOCS (documentos pendentes), PRAZO (o que define a situação: o menor prazo das pendências que
+    bloqueiam; na validação manual, das que aguardam validação) e DOCUMENTOS (nomes). Bloqueantes primeiro, depois por prazo."""
+    linhas = []
+    for (cod, controle, nf), g in x.groupby(["COD_CLIENTE", "CONTROLE", "NF"], dropna=False):
+        bloq = int(pd.to_numeric(g["NOTA_BLOQ"], errors="coerce").max()) == 1
+        ref = g[pd.to_numeric(g["BLOQUEIA"], errors="coerce") == 1] if bloq else g[pd.to_numeric(g["STATUS"], errors="coerce") == 1]
+        nomes = g["DOCUMENTO"] if "DOCUMENTO" in g.columns else g["MOTIVO"].map(_nome_documento)   # nome do tipo de documento (a regra); o texto do motivo só como reserva
+        docs = list(dict.fromkeys(str(n) for n in nomes))
+        linhas.append({"COD_CLIENTE": cod, "NF": str(nf), "CONTROLE": str(controle), "TIPO": "BLOQUEANTE" if bloq else "MANUAL",
+                       "QTD_DOCS": len(g), "PRAZO": pd.to_datetime(ref["PRAZO"], errors="coerce").min(), "DOCUMENTOS": docs})
+    out = pd.DataFrame(linhas, columns=["COD_CLIENTE", "NF", "CONTROLE", "TIPO", "QTD_DOCS", "PRAZO", "DOCUMENTOS"])
+    if out.empty:
+        return out
+    out["_ordem"] = (out["TIPO"] != "BLOQUEANTE").astype(int)
+    return out.sort_values(["_ordem", "PRAZO", "NF"]).drop(columns="_ordem").reset_index(drop=True)
+
+
 def notas_pendentes_do_cliente(codigo):
-    """Uma linha por nota do cliente que está bloqueada ou em validação manual: NF, CONTROLE, TIPO (BLOQUEANTE/MANUAL), QTD_DOCS
-    (documentos pendentes), PRAZO (o que define a situação: o menor prazo das pendências que bloqueiam; na validação manual, das
-    que aguardam validação) e DOCUMENTOS (nomes). Bloqueantes primeiro, depois por prazo. None se o banco não respondeu."""
+    """Notas do cliente que estão bloqueadas ou em validação manual (ver `_agrupar_notas`). None se o banco não respondeu."""
     from services.data_service import carregar_notas_pendentes_validacao
 
     df = carregar_notas_pendentes_validacao()
     if df is None:
         return None
     x = df[df["COD_CLIENTE"].astype(str) == str(int(float(codigo)))] if len(df) else df
-    linhas = []
-    for (controle, nf), g in x.groupby(["CONTROLE", "NF"], dropna=False):
-        bloq = int(pd.to_numeric(g["NOTA_BLOQ"], errors="coerce").max()) == 1
-        ref = g[pd.to_numeric(g["BLOQUEIA"], errors="coerce") == 1] if bloq else g[pd.to_numeric(g["STATUS"], errors="coerce") == 1]
-        docs = list(dict.fromkeys(_nome_documento(m) for m in g["MOTIVO"]))
-        linhas.append({"NF": str(nf), "CONTROLE": str(controle), "TIPO": "BLOQUEANTE" if bloq else "MANUAL", "QTD_DOCS": len(g),
-                       "PRAZO": pd.to_datetime(ref["PRAZO"], errors="coerce").min(), "DOCUMENTOS": docs})
-    out = pd.DataFrame(linhas, columns=["NF", "CONTROLE", "TIPO", "QTD_DOCS", "PRAZO", "DOCUMENTOS"])
-    if out.empty:
-        return out
-    out["_ordem"] = (out["TIPO"] != "BLOQUEANTE").astype(int)
-    return out.sort_values(["_ordem", "PRAZO", "NF"]).drop(columns="_ordem").reset_index(drop=True)
+    return _agrupar_notas(x)
+
+
+def notas_pendentes_todas():
+    """Notas de TODOS os clientes do Mercado Interno que estão bloqueadas ou em validação manual (para o painel Resumo
+    Pendências). None se o banco não respondeu."""
+    from services.data_service import carregar_notas_pendentes_validacao
+
+    df = carregar_notas_pendentes_validacao()
+    return None if df is None else _agrupar_notas(df)
+
+
+URL_CONTROLE_VENDA = "https://syncprocess.corporativo.demo.com.br/gestao-documental/controle-venda/{numero}/dados/"
+
+
+def url_controle_venda(controle):
+    """Link do controle de venda no SyncProcess: o número é o final do código (CTV-2026-003562 -> 3562). None se não achar."""
+    m = re.search(r"(\d+)\s*$", str(controle))
+    return URL_CONTROLE_VENDA.format(numero=int(m.group(1))) if m else None
 
 
 _CSS_NOTAS = ("<style>.pn-box{display:block;container-type:inline-size}"
@@ -174,3 +198,14 @@ def html_notas_pendentes(codigo):
         f'<span style="color:#8892A4;font-size:11px">{len(notas)} nota(s) · passe o mouse na linha para ver os documentos</span>'
         f'</div></div>'
     )
+
+
+def fundo_por_cor(cor_borda) -> dict:
+    """Fundo do card pela cor da borda: vermelho (#E24B4A) ou verde (#22c55e) pintam o fundo e o rótulo como no card de notas
+    pendentes; qualquer outra cor devolve {} (o card fica como era)."""
+    cor = str(cor_borda).lower()
+    if cor == _VERMELHO[0].lower():
+        return {"cor_fundo": _VERMELHO[1], "cor_label": _VERMELHO[2]}
+    if cor == _VERDE[0].lower():
+        return {"cor_fundo": _VERDE[1], "cor_label": _VERDE[2]}
+    return {}

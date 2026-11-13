@@ -14,6 +14,8 @@ from services import auth_service, clientes_transferencia, permissoes
 from services.data_service import carregar_lista_clientes
 
 ADMIN = permissoes.GRUPO_ADMIN
+RESUMO = permissoes.GRUPO_RESUMO
+FIXOS = permissoes.GRUPOS_SO_MEMBROS   # grupos que só têm a lista de membros (sem painéis/relatórios para marcar)
 
 
 def _catalogo(estrutura, cartoes, areas):
@@ -222,10 +224,10 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=(), admin_padrao=False)
     if msg := st.session_state.pop("_acessos_msg", None):
         st.success(msg)
 
-    nomes = [ADMIN] + sorted(n for n in dados["grupos"] if n != ADMIN)
+    nomes = list(FIXOS) + sorted(n for n in dados["grupos"] if n not in FIXOS)   # Resumo Pendências e Administrador sempre no topo
     g = st.session_state.get("_acessos_grupo")
     if g not in nomes:
-        g = nomes[0] if len(nomes) == 1 else nomes[1]
+        g = next((n for n in nomes if n not in FIXOS), ADMIN)
     st.session_state["_acessos_grupo"] = g
     # Os toggles de um grupo somem do estado quando ele deixa a tela; ao trocar de grupo o rascunho recomeça do salvo.
     if st.session_state.get("_acc_init") != g:
@@ -288,14 +290,18 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=(), admin_padrao=False)
             _secao_opcoes(quem)
             return
         eh_admin_grupo = g == ADMIN
+        so_membros = g in FIXOS
+        somente_leitura = g == RESUMO and not admin_padrao   # quem entra no Resumo Pendências é decidido só pelo administrador padrão
         rasc = _rascunho(g, catalogo)
         salvo = dados["grupos"][g]
         sujo = (rasc["membros"] != sorted(salvo["membros"]) or
-                (not eh_admin_grupo and (rasc["paineis"] != sorted(salvo["paineis"]) or
+                (not so_membros and (rasc["paineis"] != sorted(salvo["paineis"]) or
                                          rasc["relatorios"] != sorted(salvo["relatorios"]))))
 
         st.subheader(g)
-        if eh_admin_grupo:
+        if g == RESUMO:
+            st.caption(f"{len(rasc['membros'])} usuário(s) · só quem está nesta lista vê o painel Resumo Pendências no menu")
+        elif eh_admin_grupo:
             st.caption(f"{len(rasc['membros'])} usuário(s) · acesso total a todos os painéis e relatórios")
         else:
             partes = []
@@ -306,7 +312,7 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=(), admin_padrao=False)
             st.caption(f"{len(rasc['membros'])} usuário(s) · "
                        + ("vê " + ", ".join(partes) if partes else "nenhum painel liberado ainda"))
 
-        st.caption("1 · QUEM PARTICIPA")
+        st.caption("QUEM VÊ O PAINEL" if g == RESUMO else "1 · QUEM PARTICIPA")
         membros = st.session_state[f"acc_mem|{g}"]
         nomes_ad = _nomes(membros)
         if membros:
@@ -328,33 +334,36 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=(), admin_padrao=False)
                         fixo = u in fixos_grupo
                         rotulo = f"({u}) {nomes_ad[u]}" if u in nomes_ad else u
                         st.button(("🔒 " if fixo else "✕ ") + rotulo, key=f"acc_rm|{g}|{u}", width="content",
-                                  on_click=_remover_membro, args=(g, u), disabled=fixo,
+                                  on_click=_remover_membro, args=(g, u), disabled=fixo or somente_leitura,
                                   help="Administrador padrão do sistema, não pode ser removido" if fixo else "Remover do grupo")
         else:
             st.caption("Ninguém ainda. Adicione abaixo.")
 
-        chave_busca = f"acc_busca|{g}"
-        termo = st.text_input("Buscar usuário", key=chave_busca, label_visibility="collapsed",
-                              placeholder="Buscar no AD por nome ou login (mín. 3 letras)")
-        termo_limpo = termo.strip()
-        if len(termo_limpo) >= 3:
-            achados = [r for r in _buscar(termo_limpo) if r[0] not in membros]
-            if achados:
-                ca, cb = st.columns([4, 1])
-                escolhido = ca.selectbox("Resultado", achados, format_func=lambda r: f"({r[0]}) {r[1]}",
-                                         label_visibility="collapsed", key=f"acc_res|{g}")
-                cb.button("Adicionar", key=f"acc_ad|{g}", width="stretch", type="primary",
-                          on_click=_adicionar_membro, args=(g, escolhido[0], chave_busca, escolhido[1]))
-            else:
-                st.caption("Nenhum usuário novo encontrado no AD para essa busca.")
-                manual = permissoes.normalizar_usuario(termo_limpo)
-                if permissoes.usuario_valido(manual) and manual not in membros:
-                    st.button(f"Adicionar \"{manual}\" mesmo assim", key=f"acc_man|{g}",
-                              on_click=_adicionar_membro, args=(g, manual, chave_busca))
+        if somente_leitura:
+            st.caption("🔒 Só o administrador padrão do sistema inclui ou remove usuários deste grupo.")
+        else:
+            chave_busca = f"acc_busca|{g}"
+            termo = st.text_input("Buscar usuário", key=chave_busca, label_visibility="collapsed",
+                                  placeholder="Buscar no AD por nome ou login (mín. 3 letras)")
+            termo_limpo = termo.strip()
+            if len(termo_limpo) >= 3:
+                achados = [r for r in _buscar(termo_limpo) if r[0] not in membros]
+                if achados:
+                    ca, cb = st.columns([4, 1])
+                    escolhido = ca.selectbox("Resultado", achados, format_func=lambda r: f"({r[0]}) {r[1]}",
+                                             label_visibility="collapsed", key=f"acc_res|{g}")
+                    cb.button("Adicionar", key=f"acc_ad|{g}", width="stretch", type="primary",
+                              on_click=_adicionar_membro, args=(g, escolhido[0], chave_busca, escolhido[1]))
+                else:
+                    st.caption("Nenhum usuário novo encontrado no AD para essa busca.")
+                    manual = permissoes.normalizar_usuario(termo_limpo)
+                    if permissoes.usuario_valido(manual) and manual not in membros:
+                        st.button(f"Adicionar \"{manual}\" mesmo assim", key=f"acc_man|{g}",
+                                  on_click=_adicionar_membro, args=(g, manual, chave_busca))
         if eh_admin_grupo:
             st.caption("🔒 Administradores padrão do sistema (definidos no código) não podem ser removidos.")
 
-        if not eh_admin_grupo:
+        if not so_membros:
             st.caption("2 · O QUE O GRUPO PODE VER")
             # Sem quebra de linha nos nomes (toggles, títulos dos painéis e prévia): a coluna da esquerda leva mais largura.
             st.markdown(
@@ -390,15 +399,15 @@ def render(estrutura, cartoes, areas, quem, admins_fixos=(), admin_padrao=False)
                 if d.button("Descartar", key="acc_desc", width="stretch"):
                     st.session_state.pop("_acc_init", None)
                     st.rerun()
-                if s.button("Salvar", key="acc_salvar", type="primary", width="stretch"):
+                if s.button("Salvar", key="acc_salvar", type="primary", width="stretch", disabled=somente_leitura):
                     salvo["membros"] = rasc["membros"]
-                    if not eh_admin_grupo:
+                    if not so_membros:
                         salvo["paineis"], salvo["relatorios"] = rasc["paineis"], rasc["relatorios"]
                     permissoes.salvar(dados, quem)
                     st.session_state["_acessos_msg"] = f"Grupo {g} salvo."
                     st.rerun()
 
-        if not eh_admin_grupo:
+        if not so_membros:
             chave_conf = f"acc_confirma|{g}"
             if not st.session_state.get(chave_conf):
                 if st.button("🗑️ Excluir grupo", key="acc_excluir_ini"):

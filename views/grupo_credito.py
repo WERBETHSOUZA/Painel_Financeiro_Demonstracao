@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from components.buttons import botao_exportar_excel, botoes_acao_row
 from components.cards import card_html, render_cards_row, render_tabela_html, situacao_faturamento
-from utils.pendencias import card_pendencias
+from utils.pendencias import card_pendencias, fundo_por_cor
 from utils.exporters import exportar_excel
 from utils.mercado import sufixo_mercado
 from utils.imagem_email import gerar_imagem_resumo_titulos
@@ -313,6 +313,8 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
     # (a última linha é sempre a que tem menos cards); cada card ocupa a largura da sua coluna, então o valor não corta.
     _cartao = partial(card_html, largura="100%", altura="112px", padding="14px 20px", topo=True)
     _ADTO = object()   # no lugar do card de adiantamento, que leva o botão de atualizar por cima
+    _DOC = object()    # no lugar da Situação Documental (gestão documental do SyncProcess: só existe no Mercado Interno)
+    _externo_gc = sufixo_mercado(_titulos_sit_fat) == " - Mercado Externo"
     _cards_gc = [
         _cartao("Limite de crédito total", _formatar_moeda(limite_total), cor_borda="#6366f1"),
         _cartao("Limite de crédito disponível", _formatar_moeda(limite_disponivel),
@@ -321,11 +323,14 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
         _cartao("Consumido em Pedido de Venda", _formatar_moeda(consumido_pv), cor_borda="#4A7FB5"),
         _cartao("% do limite utilizado", f"{pct_utilizado:.2f}%".replace(".", ","),
                 cor_borda=cor_disponivel, cor_fundo=cor_fundo_disponivel),
-        _cartao("Situação Documental", situacao_cliente.capitalize(), cor_borda=cor_situacao),
-        _cartao("Status", _sit_fat_val, subtitulo=_sit_fat_sub, cor_borda=_sit_fat_cor),
+        _DOC,
+        _cartao("Status", _sit_fat_val, subtitulo=_sit_fat_sub, cor_borda=_sit_fat_cor, **fundo_por_cor(_sit_fat_cor)),
         _ADTO,
     ]
-    if sufixo_mercado(_titulos_sit_fat) != " - Mercado Externo":   # notas pendentes de validação: só Mercado Interno
+    if _externo_gc:
+        _cards_gc.remove(_DOC)
+    else:
+        _cards_gc[_cards_gc.index(_DOC)] = _cartao("Situação Documental", situacao_cliente.capitalize(), cor_borda=cor_situacao, **fundo_por_cor(cor_situacao))
         _cards_gc.insert(_cards_gc.index(_ADTO), card_pendencias(_cods_sit_fat, _cartao))
     _linhas_total = -(-len(_cards_gc) // 4)
     _base, _extra = divmod(len(_cards_gc), _linhas_total)
@@ -454,9 +459,10 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
                 {"label": "Consumido em Pedido de Venda", "valor": _formatar_moeda(consumido_pv), "cor": (74, 127, 181)},
                 {"label": "% do limite utilizado", "valor": f"{pct_utilizado:.2f}%".replace(".", ","),
                  "cor": cor_disponivel_rgb, "fundo": fundo_disponivel_rgb},
-                {"label": "Situação Documental", "valor": situacao_cliente.capitalize(), "cor": (99, 102, 241)},
                 {"label": "Status", "valor": _sit_fat_val.replace("<br>", chr(10)), "cor": (226, 75, 74) if "Bloqueado" in _sit_fat_val else (34, 197, 94)},
             ]
+            if not _externo_gc:
+                cards_para_imagem.insert(-1, {"label": "Situação Documental", "valor": situacao_cliente.capitalize(), "cor": (99, 102, 241)})
             cards_para_imagem.append({
                 "label": "Adiantamento em Aberto",
                 "valor": valor_adto,

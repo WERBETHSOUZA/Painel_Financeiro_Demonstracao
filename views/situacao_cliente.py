@@ -5,7 +5,7 @@ import pandas as pd
 from functools import partial
 from components.buttons import botao_exportar_excel, botoes_acao_row
 from components.cards import card_html, render_cards_row, render_tabela_html, situacao_faturamento, tamanho_auto
-from utils.pendencias import card_pendencias, html_notas_pendentes
+from utils.pendencias import card_pendencias, fundo_por_cor, html_notas_pendentes
 from services.data_service import carregar_regra_desconto_cliente
 from utils.exporters import exportar_excel
 from utils.mercado import sufixo_mercado
@@ -375,7 +375,7 @@ def render(
     )
     _card_status = _card_sc(
         "Status", _sit_fat_val.replace("<br>", " <br class='sc-br'>"),
-        subtitulo=_sit_fat_sub or "<span class='sc-subv'>&nbsp;</span>", cor_borda=_sit_fat_cor,
+        subtitulo=_sit_fat_sub or "<span class='sc-subv'>&nbsp;</span>", cor_borda=_sit_fat_cor, **fundo_por_cor(_sit_fat_cor),
         tamanho_valor=tamanho_auto(_status_1_linha, max_px=26, min_px=22, fator=0.53, reserva=30),
     )
 
@@ -393,9 +393,10 @@ def render(
         _card_sc("Total Vencido", _formatar_moeda(total_vencido), subtitulo=f"{qtd_titulos_vencidos} título(s)", cor_borda="#E24B4A"),
         _card_sc("% Inadimplência", f"{pct_inadimplencia:.2f}%".replace(".", ","), cor_borda=cor_inadimplencia),
         "ADIANTAMENTO",
-        _card_sc("Situação Documental", situacao_cliente.capitalize(), cor_borda=cor_situacao),
-        _card_status,
     ]
+    if not _so_externo:   # a gestão documental (SyncProcess) não existe para o Mercado Externo
+        _slots.append(_card_sc("Situação Documental", situacao_cliente.capitalize(), cor_borda=cor_situacao, **fundo_por_cor(cor_situacao)))
+    _slots.append(_card_status)
     if not _so_externo:   # a regra de desconto e as notas pendentes de validação só existem no Mercado Interno
         _slots.append(card_pendencias([codigo_agente], _card_sc))
         _regra_desc = _regra_do_cliente(df_cliente, codigo_agente)
@@ -493,10 +494,11 @@ def render(
         {"label": "Total Vencido", "valor": _formatar_moeda(total_vencido), "sub": f"{qtd_titulos_vencidos} título(s)", "cor": (226, 75, 74)},
         {"label": "% Inadimplência", "valor": f"{pct_inadimplencia:.2f}%".replace(".", ","), "cor": (226, 75, 74)},
         {"label": "Adiantamento em Aberto", "valor": valor_adto, "cor": (46, 204, 113)},
-        {"label": "Situação Documental", "valor": situacao_cliente.capitalize(), "cor": (99, 102, 241)},
         {"label": "Status", "valor": _sit_fat_val.replace("<br>", chr(10)), "cor": (226, 75, 74) if "Bloqueado" in _sit_fat_val else (34, 197, 94)},
     ]
     if not _so_externo:
+        _pos_status = len(cards_para_imagem) - 1   # Situação Documental vem antes do Status (só Mercado Interno)
+        cards_para_imagem.insert(_pos_status, {"label": "Situação Documental", "valor": situacao_cliente.capitalize(), "cor": (99, 102, 241)})
         cards_para_imagem.append({"label": "Regra de Desconto", "valor": _regra_desc, "cor": (139, 92, 246)})
 
     if df_titulos.empty:

@@ -31,6 +31,8 @@ from pathlib import Path
 ARQUIVO = Path(__file__).resolve().parent.parent / "config" / "permissoes.json"
 MAX_BACKUPS = 50
 GRUPO_ADMIN = "Administrador"
+GRUPO_RESUMO = "Resumo Pendências"   # grupo fixo: só tem membros; quem está nele vê o painel Resumo Pendências (nem o administrador vê sem estar nele)
+GRUPOS_SO_MEMBROS = (GRUPO_RESUMO, GRUPO_ADMIN)   # grupos sem lista de painéis/relatórios para marcar, na ordem em que aparecem no topo
 _USUARIO_VALIDO = re.compile(r"^[a-z0-9._-]{2,64}$")
 
 
@@ -82,7 +84,7 @@ def _grupo(v) -> dict:
 
 
 def _vazio() -> dict:
-    return {"versao": 2, "grupos": {GRUPO_ADMIN: _grupo(None)}, "desativados": []}
+    return {"versao": 2, "grupos": {GRUPO_ADMIN: _grupo(None), GRUPO_RESUMO: _grupo(None)}, "desativados": []}
 
 
 def carregar(arquivo: Path = ARQUIVO) -> dict:
@@ -95,8 +97,9 @@ def carregar(arquivo: Path = ARQUIVO) -> dict:
     dados = _vazio()
     for nome, v in (bruto.get("grupos") or {}).items():
         dados["grupos"][str(nome)] = _grupo(v)
-    dados["grupos"][GRUPO_ADMIN]["paineis"] = []
-    dados["grupos"][GRUPO_ADMIN]["relatorios"] = []
+    for fixo in GRUPOS_SO_MEMBROS:
+        dados["grupos"][fixo]["paineis"] = []
+        dados["grupos"][fixo]["relatorios"] = []
     dados["desativados"] = sorted(set(_migrar_relatorios(bruto.get("desativados") or [])))
     return dados
 
@@ -114,7 +117,7 @@ def salvar(dados: dict, quem: str, arquivo: Path = ARQUIVO) -> None:
     grupos = {}
     for nome, v in sorted(dados.get("grupos", {}).items()):
         g = _grupo(v)
-        if nome == GRUPO_ADMIN:
+        if nome in GRUPOS_SO_MEMBROS:
             g = {"membros": g["membros"]}
         else:
             g["paineis"], g["relatorios"] = sorted(set(g["paineis"])), sorted(set(g["relatorios"]))
@@ -134,6 +137,12 @@ def salvar(dados: dict, quem: str, arquivo: Path = ARQUIVO) -> None:
 def grupos_do_usuario(usuario: str, dados: dict) -> list:
     u = normalizar_usuario(usuario)
     return [nome for nome, g in dados["grupos"].items() if u in g["membros"]]
+
+
+def tem_resumo_pendencias(usuario: str, dados: dict | None = None) -> bool:
+    """True se o usuário foi incluído no grupo fixo "Resumo Pendências" (só quem está nele vê o painel)."""
+    dados = dados if dados is not None else carregar()
+    return normalizar_usuario(usuario) in dados["grupos"][GRUPO_RESUMO]["membros"]
 
 
 def eh_admin_por_grupo(usuario: str, dados: dict | None = None) -> bool:
