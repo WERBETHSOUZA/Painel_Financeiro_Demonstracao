@@ -170,6 +170,21 @@ def carregar_notas_pendentes_validacao():
 
 
 @st.cache_data(show_spinner=False)
+def carregar_controles_abertos_mi():
+    """Controles de venda abertos (COD_CLIENTE, CONTROLE, NF), inventados: os clientes bloqueados 1101 e 1103 têm controles abertos;
+    os demais também, para o painel mostrar só quem está bloqueado."""
+    rng = np.random.RandomState(nv.SEMENTE + 41)
+    linhas, nf = [], 61500
+    for cod, n in [(1101, 5), (1103, 2), (1102, 2), (1104, 1), (1302, 3)]:
+        for _ in range(n):
+            nf += int(rng.randint(3, 25))
+            linhas.append({"COD_CLIENTE": cod, "CONTROLE": f"CTV-2026-{nf + 3000:06d}", "NF": str(nf)})
+    df = pd.DataFrame(linhas)
+    df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
+    return df
+
+
+@st.cache_data(show_spinner=False)
 def carregar_pendencias_bloqueantes():
     """Notas com pendência por cliente (COD_CLIENTE, QTD_BLOQUEANTES, PRAZO_BLOQUEIO, QTD_MANUAL, PRAZO_MANUAL), calculadas das
     mesmas notas fictícias do gráfico, para o card e o gráfico sempre baterem."""

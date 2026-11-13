@@ -10,14 +10,15 @@ e, embaixo, o gráfico das notas pendentes de validação (uma barra por nota; o
 Só aparece no menu de quem está no grupo fixo "Resumo Pendências" (tela Acessos).
 """
 
+import base64
 import datetime
 from html import escape
 
 import pandas as pd
 import streamlit as st
 
-from services.data_service import (carregar_grupo_credito_geral, carregar_grupo_credito_saldo_agente, carregar_lista_clientes,
-                                   carregar_recebido_mensal_mi, carregar_recebimento_hoje_mi)
+from services.data_service import (carregar_controles_abertos_mi, carregar_grupo_credito_geral, carregar_grupo_credito_saldo_agente,
+                                   carregar_lista_clientes, carregar_recebido_mensal_mi, carregar_recebimento_hoje_mi)
 from utils.pendencias import ESTADO_ROTULO, colunas_documentos, notas_pendentes_todas, url_controle_venda
 from views.contas_receber import _nomes_curtos, formatar_moeda
 from views.relatorio_boleto_nao_gerado import _status_boleto
@@ -218,12 +219,21 @@ def _card_esperado_recebido(df_cr: pd.DataFrame) -> str:
             f'</div></div>')
 
 
-_CADEADO_FECHADO = ('<svg class="rp-cad" viewBox="0 0 16 16" width="14" height="14" aria-label="Crédito bloqueado"><title>Crédito bloqueado</title>'
-                    '<rect x="3" y="7" width="10" height="7" rx="1.5" fill="#E24B4A"/><path d="M5 7V5a3 3 0 0 1 6 0v2" fill="none" '
-                    'stroke="#E24B4A" stroke-width="1.6"/></svg>')
-_CADEADO_ABERTO = ('<svg class="rp-cad" viewBox="0 0 16 16" width="14" height="14" aria-label="Crédito liberado"><title>Crédito liberado</title>'
-                   '<rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="#22c55e" stroke-width="1.5"/>'
-                   '<path d="M5 7V5a3 3 0 0 1 5.6-1.5" fill="none" stroke="#22c55e" stroke-width="1.6"/></svg>')
+def _cadeado(cor: str, aberto: bool, rotulo: str) -> str:
+    """Cadeado como <img> com SVG em data URI (o st.html do Streamlit remove <svg> embutido na página)."""
+    if aberto:
+        corpo = (f'<rect x="3" y="7" width="10" height="7" rx="1.5" fill="none" stroke="{cor}" stroke-width="1.5"/>'
+                 f'<path d="M5 7V5a3 3 0 0 1 5.6-1.5" fill="none" stroke="{cor}" stroke-width="1.6"/>')
+    else:
+        corpo = (f'<rect x="3" y="7" width="10" height="7" rx="1.5" fill="{cor}"/>'
+                 f'<path d="M5 7V5a3 3 0 0 1 6 0v2" fill="none" stroke="{cor}" stroke-width="1.6"/>')
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14">{corpo}</svg>'
+    uri = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f'<img class="rp-cad" src="{uri}" width="14" height="14" alt="{rotulo}" title="{rotulo}">'
+
+
+_CADEADO_FECHADO = _cadeado("#E24B4A", False, "Crédito bloqueado")
+_CADEADO_ABERTO = _cadeado("#22c55e", True, "Crédito liberado")
 
 
 def _credito_por_cliente() -> dict:
@@ -244,6 +254,73 @@ def _credito_por_cliente() -> dict:
         return saida
     except Exception:
         return {}
+
+
+def _para_desbloquear(notas) -> pd.DataFrame | None:
+    """Clientes para analisar o desbloqueio: o grupo dele está bloqueado no Grupo de Crédito (bloqueado, cadastro bloqueado,
+    inadimplente ou suspenso), ele tem controle de venda ABERTO e NENHUM cliente do grupo tem pendência em documento que bloqueia
+    ou em validação (esses ficam no quadro de notas). Colunas: COD, NOME, SITUACAO, CONTROLES (lista de (controle, NF)), ordenado
+    por mais controles abertos. None se faltar alguma consulta."""
+    try:
+        geral, agentes = carregar_grupo_credito_geral(), carregar_grupo_credito_saldo_agente()
+        ctrl = carregar_controles_abertos_mi()
+        if geral is None or agentes is None or ctrl is None:
+            return None
+        sit = {g: str(v or "").strip() for g, v in zip(geral["GRUPO_CODIGO"], geral["SITUACAO_CLIENTE"])}
+        if "PAIS" in agentes.columns:                                   # a gestão documental só existe no Mercado Interno
+            agentes = agentes[agentes["PAIS"].astype(str).str.upper() == "BRA"]
+        grupo_de = {str(int(float(c))): g for c, g in zip(agentes["COD_AGENTE"], agentes["COD_GRUPO"])}
+        grupos_com_nota = {grupo_de[str(int(float(c)))] for c in notas["COD_CLIENTE"] if str(int(float(c))) in grupo_de} if not notas.empty else set()
+        por_cliente = {}
+        for c, controle, nf in zip(ctrl["COD_CLIENTE"], ctrl["CONTROLE"], ctrl["NF"]):
+            por_cliente.setdefault(str(int(float(c))), []).append((str(controle), "" if pd.isna(nf) else str(nf)))
+        linhas = []
+        for cod, nome in zip(agentes["COD_AGENTE"], agentes["NOME_AGENTE"]):
+            cod = str(int(float(cod)))
+            grupo = grupo_de.get(cod)
+            t = sit.get(grupo, "")
+            if not any(x in t.upper() for x in ("BLOQ", "INADIMPL", "SUSPENS")) or grupo in grupos_com_nota or cod not in por_cliente:
+                continue
+            linhas.append({"COD": cod, "NOME": str(nome), "SITUACAO": t, "CONTROLES": sorted(por_cliente[cod], key=lambda x: x[1], reverse=True)})
+        out = pd.DataFrame(linhas, columns=["COD", "NOME", "SITUACAO", "CONTROLES"]).drop_duplicates("COD")
+        if out.empty:
+            return out
+        out["_n"] = out["CONTROLES"].map(len)
+        return out.sort_values(["_n", "NOME"], ascending=[False, True]).drop(columns="_n").reset_index(drop=True)
+    except Exception:
+        return None
+
+
+def _html_para_desbloquear(df) -> str:
+    cabeca = ('<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+              '<span style="color:#e0e0e0;font-size:14px;font-weight:600">Para desbloquear · bloqueados no crédito, sem pendência documental</span>'
+              f'<span style="font-size:11px;color:#8892a4">{0 if df is None else len(df)} cliente(s) · com controle de venda aberto</span></div>')
+    if df is None:
+        return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Não foi possível consultar agora.</span></div>'
+    if df.empty:
+        return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Nenhum cliente nesta situação.</span></div>'
+    grade = "grid-template-columns:22px minmax(0,1.6fr) 80px minmax(0,1.4fr) 140px 70px"
+    topo = (f'<div class="rp-q rp-qh" style="{grade}"><span></span><span style="text-align:left">Cliente</span><span class="rp-pz" style="text-align:left">Código</span>'
+            '<span style="text-align:left">Controles abertos (NF)</span><span style="text-align:left">Situação do crédito</span><span class="rp-pz">Controles</span></div>')
+    linhas = ""
+    for r in df.itertuples(index=False):
+        links = ""
+        for controle, nf in r.CONTROLES[:3]:
+            url = url_controle_venda(controle)
+            rot = escape(f"NF {nf}" if nf else controle)
+            links += (f'<a href="{url}" target="_blank" rel="noopener noreferrer" title="{escape(controle, quote=True)}" '
+                      f'style="color:#fff;font-weight:600;text-decoration:none;margin-right:10px">{rot}</a>') if url else f'<span style="margin-right:10px">{rot}</span>'
+        if len(r.CONTROLES) > 3:
+            links += f'<span style="color:#8892a4">+{len(r.CONTROLES) - 3}</span>'
+        linhas += (f'<div class="rp-q rp-qr" style="{grade}"><span class="rp-cadc">{_CADEADO_FECHADO}</span>'
+                   f'<span class="rp-cli" title="{escape(r.NOME, quote=True)}">{escape(r.NOME)}</span>'
+                   f'<span class="rp-pz" style="text-align:left">{escape(r.COD)}</span><span style="white-space:nowrap;overflow:hidden">{links}</span>'
+                   f'<span style="color:#f3a3a2;font-size:12px">{escape(r.SITUACAO.capitalize())}</span><span class="rp-pz">{len(r.CONTROLES)}</span></div>')
+    rodape = ('<div style="font-size:11px;color:#8892a4;margin-top:10px;line-height:1.6">Sai da lista quando o grupo for liberado no Grupo de Crédito, '
+              'quando o controle fechar ou quando surgir pendência em documento que bloqueia (aí vai para o quadro de notas). Clique na NF para '
+              'abrir o controle de venda no SyncProcess. Lista de análise: o bloqueio pode ser de crédito (limite, inadimplência), não só documental.</div>')
+    return (f'<div class="rp-lista" style="border-top-color:#F59E0B">{cabeca}{topo}<div style="max-height:320px;overflow-y:auto;'
+            f'scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>{rodape}</div>')
 
 
 def _grafico_notas(notas, filtro: str) -> str:
@@ -310,3 +387,4 @@ def render(df_cr: pd.DataFrame) -> None:
     filtro = st.segmented_control("Notas", ["Todas", "Bloqueantes", "Validação manual"], default="Todas",
                                   key="rp_filtro", label_visibility="collapsed") or "Todas"
     st.html(_CSS + _grafico_notas(notas, filtro))
+    st.html(_CSS + _html_para_desbloquear(_para_desbloquear(notas)))     # card fixo abaixo do quadro, sem botão
