@@ -81,11 +81,15 @@ Os gráficos principais entram com uma animação curta (cerca de 1 segundo), fe
 | Rosca "Situação" (Contas a Receber, Situação Cliente, Grupo de Crédito, Faturamento) | a rosca se desenha até o valor |
 | Distribuição por banco e por estado, limite de crédito | barras empilhadas e barras de ranking crescem |
 | Total Faturado (por ano e últimos 12 meses) | linha e área reveladas da esquerda para a direita |
+| Contas a Receber MI: lista do card Recebimentos por Data e Top Clientes a Receber | barras crescem da esquerda para a direita **em cascata** (cada linha começa 45 ms depois da anterior) |
+| Contas a Receber MI: bloco "Hoje" | a barra de progresso (esperado / recebido) enche até o percentual |
+| Contas a Receber MI: gráfico do Resumo | as colunas **sobem de baixo para cima**, mês a mês; depois os valores e as marcas do ano anterior aparecem com um fade |
+| Contas a Receber MI: botão A receber \| Recebido | o card vira (giro rápido) ao trocar de lado |
 
 A animação roda quando o gráfico aparece (abrir a tela, trocar de cliente ou grupo, abrir uma aba) e não se repete
 ao clicar em **Atualizar**. Os cards e os números não são animados, e quem usa "reduzir movimento" no sistema
 operacional não vê as animações. Os estilos estão em [`assets/styles.css`](assets/styles.css) (classes `an-wipe`,
-`an-rosca` e `an-area`).
+`an-rosca`, `an-area`, `an-col` e `an-fade`).
 
 {{PERFORMANCE}}
 

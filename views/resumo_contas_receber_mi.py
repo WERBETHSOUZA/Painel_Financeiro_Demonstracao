@@ -107,12 +107,12 @@ def _grafico(atual: pd.DataFrame, anterior: pd.DataFrame, ano: int, ocultar: boo
         s.append(f'<text x="{x + bw / 2:.1f}" y="{H - 8}" fill="#8892A4" font-size="10" text-anchor="middle">{_ABREV[m - 1]}</text>')
         if m in va:
             h = va[m] / teto * area
-            s.append(f'<rect x="{x + bw * 0.2:.1f}" y="{y(va[m]):.1f}" width="{bw * 0.6:.1f}" height="{h:.1f}" rx="3" fill="{_VERDE}"/>'
-                     f'<text x="{x + bw / 2:.1f}" y="{y(va[m]) - 4:.1f}" fill="#e0e0e0" font-size="10" text-anchor="middle">{"" if ocultar else _mi(va[m])}</text>')
+            s.append(f'<rect class="an-col" style="animation-delay:{(m - 1) * 70}ms" x="{x + bw * 0.2:.1f}" y="{y(va[m]):.1f}" width="{bw * 0.6:.1f}" height="{h:.1f}" rx="3" fill="{_VERDE}"/>'
+                     f'<text class="an-fade" style="animation-delay:{(m - 1) * 70 + 450}ms" x="{x + bw / 2:.1f}" y="{y(va[m]) - 4:.1f}" fill="#e0e0e0" font-size="10" text-anchor="middle">{"" if ocultar else _mi(va[m])}</text>')
     for m in sorted(va):                       # ano anterior: um traço por coluna (só nos meses que têm coluna)
         if m in vp:
             x0 = PL + (m - 1) * bw
-            s.append(f'<line x1="{x0 + bw * 0.08:.1f}" x2="{x0 + bw * 0.92:.1f}" y1="{y(vp[m]):.1f}" y2="{y(vp[m]):.1f}" '
+            s.append(f'<line class="an-fade" style="animation-delay:{(m - 1) * 40 + 900}ms" x1="{x0 + bw * 0.08:.1f}" x2="{x0 + bw * 0.92:.1f}" y1="{y(vp[m]):.1f}" y2="{y(vp[m]):.1f}" '
                      f'stroke="{_ROSA}" stroke-width="3" stroke-linecap="round"/>')
 
     css = ""

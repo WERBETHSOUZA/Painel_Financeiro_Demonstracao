@@ -418,7 +418,7 @@ def _bloco_recebimento_hoje(ocultar: bool = False) -> str:
              if nd + adiantamento > 0 else "")
     barra = (
         '<div style="position:relative;margin-top:9px">'
-        '<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:rgba(128,128,128,0.15)">'
+        '<div class="an-wipe" style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:rgba(128,128,128,0.15)">'
         f'<span style="width:{larg(baixa_esperado)}%;background:#4fa3e0"></span>'
         f'<span style="width:{larg(aberto)}%;background:#5a6280"></span>'
         f'<span style="width:{larg(nd)}%;background:#1BADA6"></span>'
@@ -624,7 +624,7 @@ def _recebido_mes(ocultar: bool, ano: int, mes: int):
             f'<span style="color:#4fa3e0;font-size:11px;font-weight:600;text-align:right;white-space:nowrap">'
             f'{"••" if ocultar else f"{pct:.2f}%"}</span>'
             '<div style="height:12px;border-radius:3px;background:rgba(128,128,128,0.15);overflow:hidden">'
-            f'<div style="width:{row["VALOR_PAGO"] / maximo * 100:.1f}%;height:100%;background:rgba(79,163,224,{opac})"></div></div>'
+            f'<div class="an-wipe" style="animation-delay:{min(i, 14) * 45}ms;width:{row["VALOR_PAGO"] / maximo * 100:.1f}%;height:100%;background:rgba(79,163,224,{opac})"></div></div>'
             f'<span style="color:#ffffff;font-size:12px;text-align:right;white-space:nowrap">{fmt(row["VALOR_PAGO"])}</span>'
             '</div>'
         )
@@ -709,7 +709,7 @@ def _tabela_recebimentos_dia(df: pd.DataFrame, ocultar: bool = False):
             f'<span style="color:#e0e0e0;white-space:nowrap">{data_fmt}</span>'
             f'<span style="color:#4fa3e0;font-size:11px;font-weight:600;text-align:right;white-space:nowrap">{pct_txt}</span>'
             f'<div style="height:12px;border-radius:3px;background:rgba(128,128,128,0.15);overflow:hidden">'
-            f'<div style="width:{barw:.1f}%;height:100%;background:rgba(79,163,224,{opac})"></div></div>'
+            f'<div class="an-wipe" style="animation-delay:{min(i, 14) * 45}ms;width:{barw:.1f}%;height:100%;background:rgba(79,163,224,{opac})"></div></div>'
             f'<span style="color:#ffffff;font-size:12px;text-align:right;white-space:nowrap">{val_txt}</span>'
             '</div>'
         )
@@ -817,7 +817,7 @@ def _ranking_clientes(df: pd.DataFrame, ocultar: bool = False, df_grupo_agentes=
             f'<span style="color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{nome}</span>'
             f'<span style="color:#22a35a;font-size:11px;font-weight:600;text-align:right;white-space:nowrap">{pct_txt}</span>'
             f'<div style="height:14px;border-radius:4px;background:rgba(128,128,128,0.15);overflow:hidden">'
-            f'<div style="width:{barw:.1f}%;height:100%;background:rgba(46,204,113,{opac})"></div></div>'
+            f'<div class="an-wipe" style="animation-delay:{min(i, 14) * 45}ms;width:{barw:.1f}%;height:100%;background:rgba(46,204,113,{opac})"></div></div>'
             f'<span style="color:#ffffff;font-size:12px;text-align:right;white-space:nowrap">{val_txt}</span>'
             '</div>'
         )
