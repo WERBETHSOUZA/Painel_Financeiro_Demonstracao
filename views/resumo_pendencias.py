@@ -200,7 +200,7 @@ def _card_notas(notas) -> str:
                  f"{len(bloq)} bloqueante(s) · {man} manual(is) · {clientes} cliente(s)", itens=itens, chave="rpkn")
 
 
-def _card_esperado_recebido(df_cr: pd.DataFrame) -> str:
+def _card_esperado_recebido(df_cr: pd.DataFrame, ocultar: bool = False) -> str:
     """Quantidade de títulos DO DIA: recebido = baixas que entraram no banco hoje (mesma regra do Resumo do Contas a Receber MI,
     pela data da baixa); esperado = recebido + parcelas que ainda estão em aberto para o crédito de hoje (vencimento + 1 dia
     útil, a mesma conta do bloco "Hoje" do Contas a Receber MI). Fim de semana: sem parcela esperada, só o que entrar."""
@@ -219,14 +219,15 @@ def _card_esperado_recebido(df_cr: pd.DataFrame) -> str:
     except Exception:
         return _indisponivel(titulo)
     esperado = recebido + faltam
+    moeda = (lambda v: "R$ ••••••") if ocultar else formatar_moeda        # Ocultar esconde só os valores em R$ (títulos e % continuam)
     pct = min(recebido / esperado * 100, 100.0) if esperado else 0.0
     pct_txt = f"{pct:.2f}".replace(".", ",")
-    rodape = f"faltam {faltam} título(s) · {formatar_moeda(max(valor_esp - valor_rec, 0.0))} · só entrada no banco" if info else "sem crédito previsto hoje · só entrada no banco"
+    rodape = f"faltam {faltam} título(s) · {moeda(max(valor_esp - valor_rec, 0.0))} · só entrada no banco" if info else "sem crédito previsto hoje · só entrada no banco"
     return (f'<div><div class="rp-t" title="{titulo}">{titulo}</div><div class="rp-card" style="border-color:{_VERDE}">'
             f'<div class="rp-top"><span>Hoje, {hoje:%d/%m/%Y}</span><b>{pct_txt}<i style="color:{_VERDE}">%</i></b></div><div class="rp-ln"></div>'
-            f'<div class="rp-mt">Esperado · {esperado} título(s)</div><div class="rp-vl">{formatar_moeda(valor_esp)}</div>'
+            f'<div class="rp-mt">Esperado · {esperado} título(s)</div><div class="rp-vl">{moeda(valor_esp)}</div>'
             f'<div class="rp-barra"><div style="width:{pct:.1f}%;background:{_VERDE}"></div></div>'
-            f'<div class="rp-mt">Recebido no banco · {recebido} título(s)</div><div class="rp-vl" style="color:{_VERDE}">{formatar_moeda(valor_rec)}</div>'
+            f'<div class="rp-mt">Recebido no banco · {recebido} título(s)</div><div class="rp-vl" style="color:{_VERDE}">{moeda(valor_rec)}</div>'
             f'<div style="flex:1"></div><div class="rp-ln"></div><div class="rp-mt">{rodape}</div>'
             f'</div></div>')
 
@@ -475,9 +476,17 @@ def _pre_carregar() -> None:
 
 
 def render(df_cr: pd.DataFrame) -> None:
-    c_tit, c_xls, c_at = st.columns([7, 1.4, 1.2], vertical_alignment="center")
+    # o botão Ocultar usa o mesmo estado do Contas a Receber (cr_ocultar): esconder valores vale para o app todo
+    if "cr_ocultar" not in st.session_state:
+        st.session_state["cr_ocultar"] = False
+    ocultar = st.session_state["cr_ocultar"]
+    c_tit, c_oc, c_xls, c_at = st.columns([6, 1.3, 1.4, 1.2], vertical_alignment="center")
     with c_tit:
         st.title("Resumo Pendências")
+    with c_oc:
+        st.button("Ocultar" if not ocultar else "Exibir", icon=":material/visibility_off:" if not ocultar else ":material/visibility:",
+                  key="btn_ocultar_rp", use_container_width=True, help="Ocultar/exibir o valor em R$ do cartão Esperado e Recebido no banco",
+                  on_click=lambda: st.session_state.update(cr_ocultar=not st.session_state.get("cr_ocultar", False)))
     with c_at:
         if st.button("🔄 Atualizar", key="rp_atualizar", width="stretch"):
             st.cache_data.clear()
@@ -486,7 +495,7 @@ def render(df_cr: pd.DataFrame) -> None:
     with st.spinner("Montando o resumo..."):
         _pre_carregar()
         notas = notas_pendentes_todas()
-        cards = [_card_descontos(df_cr), _card_boletos(df_cr), _card_notas(notas), _card_esperado_recebido(df_cr)]
+        cards = [_card_descontos(df_cr), _card_boletos(df_cr), _card_notas(notas), _card_esperado_recebido(df_cr, ocultar)]
     st.html(_CSS + '<div class="rp-grade">' + "".join(cards) + "</div>")
 
     if notas is None:
