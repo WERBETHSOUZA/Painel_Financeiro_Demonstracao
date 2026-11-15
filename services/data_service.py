@@ -153,23 +153,31 @@ def carregar_notas_pendentes_validacao():
             prazo = hoje + pd.Timedelta(days=int(rng.randint(-4, -1)) if tipo == "bloq" else int(rng.randint(1, 8)))
             for k, i in enumerate(idx):
                 codigo, nome = docs[i]
+                doc_status = None                       # sem documento anexado
+                anexado = validado = pd.NaT
                 if tipo == "avencer":
                     status, bloqueia, motivo = 0, 0, f"Documento obrigatório {nome} ainda não foi anexado ao checklist."
                 elif k == 0 and tipo == "bloq":
-                    status, bloqueia, motivo = 2, 1, f"Documento {nome} ainda não foi anexado. Prazo documental vencido."
+                    # prazo vencido e bloqueando: o documento pode estar inválido ou ainda em validação (anexado, aguardando revisão)
+                    status, bloqueia, motivo = 2, 1, f"Documento {nome} aguardando conclusão da validação OCR/revisão. Prazo documental vencido."
+                    doc_status = 2 if rng.rand() < 0.5 else 0
+                    anexado = prazo + pd.Timedelta(hours=int(rng.randint(-60, 72)))      # às vezes antes, às vezes depois do prazo
                 elif k == 0:
                     status, bloqueia, motivo = 1, 0, f"Documento {nome} aguardando conclusão da validação OCR/revisão."
+                    doc_status = 0
+                    anexado = hoje - pd.Timedelta(hours=int(rng.randint(2, 70)))
                 elif rng.rand() < 0.5:
                     status, bloqueia, motivo = 3, 0, f"Documento {nome} validado."
                 else:
                     status, bloqueia, motivo = 0, 0, f"Documento obrigatório {nome} ainda não foi anexado ao checklist."
                 linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": status, "BLOQUEIA": bloqueia,
-                               "PRAZO": prazo, "MOTIVO": motivo, "DOC_CODIGO": codigo, "DOCUMENTO": nome,
-                               "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual"), "NOTA_AVENCER": int(tipo == "avencer")})
+                               "PRAZO": prazo, "MOTIVO": motivo, "DOC_CODIGO": codigo, "DOCUMENTO": nome, "DOC_STATUS": doc_status,
+                               "ANEXADO_EM": anexado, "VALIDADO_EM": validado, "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual"), "NOTA_AVENCER": int(tipo == "avencer")})
             # o Pedido de venda (não bloqueia) aparece como Válido, gerado automaticamente
             linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": 3, "BLOQUEIA": 0, "PRAZO": pd.NaT,
                            "MOTIVO": "Pedido de venda gerado automaticamente pelo MEGA/SyncProcess", "DOC_CODIGO": "PEDVENDA",
-                           "DOCUMENTO": "Pedido de venda", "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual"),
+                           "DOCUMENTO": "Pedido de venda", "DOC_STATUS": 1,
+                           "ANEXADO_EM": hoje - pd.Timedelta(days=int(rng.randint(3, 9))), "VALIDADO_EM": hoje - pd.Timedelta(days=int(rng.randint(2, 8))), "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual"),
                        "NOTA_AVENCER": int(tipo == "avencer")})
     df = pd.DataFrame(linhas)
     df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")

@@ -12,6 +12,8 @@ Só aparece no menu de quem está no grupo fixo "Resumo Pendências" (tela Acess
 
 import base64
 import datetime
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from html import escape
 
 import pandas as pd
@@ -21,8 +23,9 @@ from components.buttons import botao_exportar_excel
 from utils.exporters import exportar_excel_abas_recebimentos
 
 from services.data_service import (carregar_controles_abertos_mi, carregar_grupo_credito_geral, carregar_grupo_credito_saldo_agente,
-                                   carregar_lista_clientes, carregar_recebido_mensal_mi, carregar_recebimento_hoje_mi)
-from utils.pendencias import ESTADO_ROTULO, colunas_documentos, notas_pendentes_todas, url_busca_controles, url_controle_venda
+                                   carregar_lista_clientes, carregar_notas_pendentes_validacao, carregar_recebido_periodo_mi,
+                                   carregar_recebimento_hoje_mi)
+from utils.pendencias import ESTADO_ROTULO, _ha_dias, _quando, colunas_documentos, dica_documento, notas_pendentes_todas, url_busca_controles, url_controle_venda
 from views.contas_receber import _nomes_curtos, formatar_moeda
 from views.relatorio_boleto_nao_gerado import _status_boleto
 from views.relatorio_desconto_financeiro_pendente import resumo_descontos_pendentes
@@ -55,12 +58,15 @@ _CSS = """<style>
 .rp-qh{font-size:11px;color:#8892a4;text-align:center;line-height:1.2;padding-bottom:6px;border-bottom:1px solid #2a2a3a;align-items:end}
 .rp-q a{color:#fff;font-weight:600;text-decoration:none;white-space:nowrap}.rp-q a:hover{text-decoration:underline;color:#6db3f5}
 .rp-cad{vertical-align:-2px}.rp-cadc{display:flex;align-items:center;justify-content:center}
+.rp-ua{font-size:12px;text-align:center;line-height:1.4;color:#d1d5db;white-space:nowrap;font-weight:500}
+.rp-tag{display:inline-block;margin-top:2px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(245,158,11,.22);color:#f5c070}
 .rp-cli{color:#aab2c5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rp-c{height:24px;border-radius:5px;font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:600}
-.rp-c-VENCIDO{background:rgba(226,75,74,.28);color:#f3a3a2}.rp-c-VALIDANDO{background:rgba(55,138,221,.25);color:#8ec2f5}
+.rp-c-INVALIDO{background:rgba(226,75,74,.28);color:#f3a3a2}.rp-c-blq{box-shadow:inset 0 0 0 1.5px #E24B4A}.rp-c-VALIDANDO{background:rgba(55,138,221,.25);color:#8ec2f5}
 .rp-c-NAO_ANEXADO,.rp-c-PENDENTE{background:rgba(156,163,175,.22);color:#d1d5db}
 .rp-c-OK{background:rgba(34,197,94,.16);color:#6fd69a}.rp-c-ND{color:#6b7280;font-weight:400}
 .rp-qr{padding:5px 0;border-bottom:1px solid #26263a}.rp-pz{text-align:right;color:#8892a4;white-space:nowrap}
+@media (max-width:1350px){.rp-q{grid-template-columns:70px 22px minmax(0,1.8fr) repeat(var(--rpn),minmax(0,1fr)) 100px 104px !important}.rp-c{font-size:10px;padding:0 2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:block;line-height:24px;text-align:center}}
 @media (max-width:760px){.rp-cli,.rp-pz{display:none}}
 </style>"""
 
@@ -201,10 +207,10 @@ def _card_esperado_recebido(df_cr: pd.DataFrame) -> str:
     titulo = "Esperado e Recebido no banco"
     hoje = datetime.date.today()
     try:
-        rec = carregar_recebido_mensal_mi(hoje.year)
-        if rec is None:
-            return _indisponivel(titulo)
-        d = rec[rec["DIA"].dt.date == hoje]
+        # só o dia de hoje (consulta de 1 dia, ~0,1 s): trazer o ano inteiro só para pegar o dia levava ~4 s e dá o mesmo resultado
+        d = carregar_recebido_periodo_mi(hoje, hoje)
+        if d is None or d.empty:
+            d = pd.DataFrame(columns=["DOC", "AGN", "PARC", "VALOR_PAGO"])
         recebido = d[["DOC", "AGN", "PARC"]].drop_duplicates().shape[0]
         info = carregar_recebimento_hoje_mi() or {}
         faltam = int(info.get("abertas", 0) or 0)
@@ -238,6 +244,16 @@ def _cadeado(cor: str, aberto: bool, rotulo: str) -> str:
     return f'<img class="rp-cad" src="{uri}" width="14" height="14" alt="{rotulo}" title="{rotulo}">'
 
 
+def _relogio_alerta(cor: str = "#f5c070") -> str:
+    """Relógio com ponto de exclamação (anexo depois do prazo), como <img> com SVG em data URI (o st.html remove <svg> embutido)."""
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="{cor}" '
+           f'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.99 12.34A9 9 0 1 0 12.4 20.97"/>'
+           f'<path d="M12 7v5l2 2"/><path d="M19 16v3"/><path d="M19 22v.01"/></svg>')
+    uri = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f'<img src="{uri}" width="15" height="15" alt="" style="vertical-align:-3px;margin-right:5px">'
+
+
+_RELOGIO_ALERTA = _relogio_alerta()
 _CADEADO_FECHADO = _cadeado("#E24B4A", False, "Crédito bloqueado")
 _CADEADO_ABERTO = _cadeado("#22c55e", True, "Crédito liberado")
 
@@ -338,14 +354,14 @@ def _grafico_notas(notas, filtro: str) -> str:
     if d.empty:
         return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Nenhuma nota neste filtro.</span></div>'
     cols = colunas_documentos(d)
-    grade = f"grid-template-columns:70px 22px minmax(0,1.25fr) repeat({len(cols)},minmax(0,1fr)) 92px"
+    grade = (f"grid-template-columns:70px 22px minmax(150px,1fr) repeat({len(cols)},minmax(86px,98px)) 124px 128px;--rpn:{len(cols)}")   # cartões dos documentos estreitos: sobra espaço para o nome do cliente
     topo = (f'<div class="rp-q rp-qh" style="{grade}"><span style="text-align:left">NF</span><span class="rp-cadc"></span><span class="rp-cli" style="text-align:left">Cliente</span>'
             + "".join(f'<span title="{escape(nome, quote=True)}">{escape(nome)}</span>' for _, nome, _ in cols)
-            + '<span class="rp-pz">Prazo</span></div>')
+            + '<span>Último anexo</span><span class="rp-pz">Prazo</span></div>')
     linhas = ""
     for r in d.itertuples(index=False):
         cli = nomes.get(str(int(float(r.COD_CLIENTE))), f"Cliente {r.COD_CLIENTE}")
-        prazo = r.PRAZO.strftime("%d/%m/%Y") if pd.notna(r.PRAZO) else "—"
+        prazo = r.PRAZO.strftime("%d/%m/%Y %H:%M") if pd.notna(r.PRAZO) else "—"
         bloqueado = credito.get(str(int(float(r.COD_CLIENTE))))
         cad = "" if bloqueado is None else (_CADEADO_FECHADO if bloqueado else _CADEADO_ABERTO)
         url = url_controle_venda(r.CONTROLE)
@@ -356,15 +372,26 @@ def _grafico_notas(notas, filtro: str) -> str:
         for c, nome, _ in cols:
             e_ = r.ESTADOS.get(c)
             if e_ is None:
-                celulas += f'<div class="rp-c rp-c-ND" title="{escape(nome, quote=True)}: não se aplica">—</div>'
+                celulas += f'<div class="rp-c rp-c-ND" title="{escape(dica_documento(r, c, nome), quote=True)}">—</div>'
             else:
-                celulas += f'<div class="rp-c rp-c-{e_}" title="{escape(nome, quote=True)}">{ESTADO_ROTULO[e_]}</div>'
+                blq = r.BLOQUEANDO.get(c, False)
+                celulas += (f'<div class="rp-c rp-c-{e_}{" rp-c-blq" if blq else ""}" '
+                            f'title="{escape(dica_documento(r, c, nome), quote=True)}">{ESTADO_ROTULO[e_]}</div>')
+        if pd.notna(r.ULTIMO_ANEXO):
+            apos = bool(r.APOS_PRAZO)                       # algum documento ainda não válido entrou depois do prazo
+            cor_ua = "#f5c070" if apos else "#6fd69a"        # amarelo = após o prazo, verde = no prazo
+            dica_ua = (f"Último anexo: {_quando(r.ULTIMO_ANEXO)}\n{'Anexado após o prazo' if apos else 'Anexado no prazo'}"
+                       + (f" ({pd.Timestamp(r.PRAZO):%d/%m %H:%M})" if pd.notna(r.PRAZO) else ""))
+            ultimo = f'<span class="rp-ua" style="color:{cor_ua}" title="{escape(dica_ua, quote=True)}">{_RELOGIO_ALERTA if apos else ""}{_ha_dias(r.ULTIMO_ANEXO)}</span>'
+        else:
+            ultimo = '<span class="rp-ua" style="color:#6b7280">sem anexo</span>'
         linhas += (f'<div class="rp-q rp-qr" style="{grade}">{nf}<span class="rp-cadc">{cad}</span><span class="rp-cli" title="Abrir os controles de venda de {escape(cli, quote=True)} no SyncProcess">'
                    f'<a href="{url_busca_controles(cli)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">{escape(cli)}</a></span>'
-                   f'{celulas}<span class="rp-pz">{prazo}</span></div>')
+                   f'{celulas}{ultimo}<span class="rp-pz">{prazo}</span></div>')
     legenda = ('<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#8892a4;margin-top:10px">'
-               '<span><span style="color:#E24B4A">●</span> inválido (prazo vencido, bloqueia)</span><span><span style="color:#378ADD">●</span> em validação</span>'
+               '<span><span style="color:#E24B4A">●</span> inválido</span><span><span style="color:#378ADD">●</span> em validação</span>'
                '<span><span style="color:#9ca3af">●</span> pendente (sem documento)</span><span><span style="color:#22c55e">●</span> válido</span>'
+               '<span><span style="border:1.5px solid #E24B4A;border-radius:3px;display:inline-block;width:12px;height:9px;vertical-align:-1px"></span> contorno vermelho = bloqueando (prazo vencido)</span>'
                '<span>— a regra não vale para a nota</span><span>' + _CADEADO_FECHADO + ' crédito bloqueado · ' + _CADEADO_ABERTO + ' crédito liberado</span><span>clique na NF para abrir o controle de venda e no nome do cliente para ver os controles dele no SyncProcess</span></div>')
     return (f'<div class="rp-lista">{cabeca}{topo}<div style="max-height:420px;overflow-y:auto;scrollbar-width:thin;'
             f'scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>{legenda}</div>')
@@ -393,10 +420,14 @@ def _excel(notas, desbloquear) -> bytes:
                  "Situação da nota": {"BLOQUEANTE": "Bloqueante", "MANUAL": "Validação manual"}.get(r.TIPO, "A vencer (sem anexo)")}
         for c, nome_doc, _ in cols_doc:
             e = r.ESTADOS.get(c)
-            linha[nome_doc] = "—" if e is None else ESTADO_ROTULO[e]
+            linha[nome_doc] = "—" if e is None else ESTADO_ROTULO[e] + (" (bloqueando)" if r.BLOQUEANDO.get(c, False) else "")
+        for c, nome_doc, _ in cols_doc:
+            linha[f"{nome_doc} · anexado em"] = _prazo_txt(r.ANEXADOS.get(c, pd.NaT))
+        linha["Último anexo"] = _prazo_txt(r.ULTIMO_ANEXO)
+        linha["Situação do anexo"] = "Após o prazo" if r.APOS_PRAZO else ("No prazo" if pd.notna(r.ULTIMO_ANEXO) else "")
         linha["Prazo"] = _prazo_txt(r.PRAZO)
         linhas.append(linha)
-    base = ["NF", "Controle", "Cód. Cliente", "Cliente", "Crédito", "Situação da nota"] + [n for _, n, _ in cols_doc] + ["Prazo"]
+    base = ["NF", "Controle", "Cód. Cliente", "Cliente", "Crédito", "Situação da nota"] + [n for _, n, _ in cols_doc] + [f"{n} · anexado em" for _, n, _ in cols_doc] + ["Último anexo", "Situação do anexo", "Prazo"]
     notas_df = pd.DataFrame(linhas, columns=base)
 
     if desbloquear is None or desbloquear.empty:
@@ -413,17 +444,47 @@ def _excel(notas, desbloquear) -> bytes:
     ])
 
 
+def _pre_carregar() -> None:
+    """Dispara AO MESMO TEMPO as consultas independentes do painel para encher o cache: cada uma leva ~1 s e, uma depois da outra,
+    somavam ~4 s; juntas levam o tempo da mais lenta. Depois disso a tela só lê o cache. Qualquer falha é ignorada (a tela então
+    chama cada consulta normalmente, uma por vez)."""
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+        ctx = get_script_run_ctx()
+    except Exception:
+        add_script_run_ctx, ctx = None, None
+    hoje = datetime.date.today()
+    tarefas = [(carregar_notas_pendentes_validacao, ()), (carregar_controles_abertos_mi, ()), (carregar_grupo_credito_geral, ()),
+               (carregar_grupo_credito_saldo_agente, ()), (carregar_lista_clientes, ()), (carregar_recebido_periodo_mi, (hoje, hoje)),
+               (carregar_recebimento_hoje_mi, ())]
+
+    def rodar(f, args):
+        if ctx is not None and add_script_run_ctx is not None:
+            add_script_run_ctx(threading.current_thread(), ctx)       # a thread enxerga o cache e o estado da sessão
+        try:
+            f(*args)
+        except Exception:
+            pass
+
+    try:
+        with ThreadPoolExecutor(max_workers=len(tarefas)) as pool:
+            for f, args in tarefas:
+                pool.submit(rodar, f, args)
+    except Exception:
+        pass
+
+
 def render(df_cr: pd.DataFrame) -> None:
     c_tit, c_xls, c_at = st.columns([7, 1.4, 1.2], vertical_alignment="center")
     with c_tit:
         st.title("Resumo Pendências")
-        st.caption("Mercado Interno · quantidades (só o Esperado e Recebido mostra valores em R$) · atualiza a cada 5 minutos")
     with c_at:
         if st.button("🔄 Atualizar", key="rp_atualizar", width="stretch"):
             st.cache_data.clear()
             st.rerun()
 
     with st.spinner("Montando o resumo..."):
+        _pre_carregar()
         notas = notas_pendentes_todas()
         cards = [_card_descontos(df_cr), _card_boletos(df_cr), _card_notas(notas), _card_esperado_recebido(df_cr)]
     st.html(_CSS + '<div class="rp-grade">' + "".join(cards) + "</div>")

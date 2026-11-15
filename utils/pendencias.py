@@ -109,25 +109,36 @@ def _nome_documento(motivo) -> str:
     return t if len(t) <= 48 else t[:47] + "…"
 
 
+# documentos que as PESSOAS anexam (contam para "último anexo" e "após o prazo"); aceite do pedido, pedido de compra e pedido de venda são automáticos
+_DOCS_ANEXADOS = ("CNH", "NFCANHOTO", "CARTATEMP")
 _ABERTOS = (0, 1, 2, 6)   # status de pendência ainda aberta (3 = regularizada: documento em ordem)
-_GRAVIDADE = {"VENCIDO": 4, "VALIDANDO": 3, "NAO_ANEXADO": 2, "PENDENTE": 1, "OK": 0}
+_GRAVIDADE = {"INVALIDO": 4, "VALIDANDO": 3, "NAO_ANEXADO": 2, "PENDENTE": 1, "OK": 0}
 # nomes iguais aos da Gestão documental do SyncProcess: Pendente (sem documento), Em validação, Inválido (prazo vencido, bloqueio ativo) e Válido
-ESTADO_ROTULO = {"VENCIDO": "Inválido", "VALIDANDO": "Em validação", "NAO_ANEXADO": "Pendente", "PENDENTE": "Pendente", "OK": "Válido"}
+ESTADO_ROTULO = {"INVALIDO": "Inválido", "VALIDANDO": "Em validação", "NAO_ANEXADO": "Pendente", "PENDENTE": "Pendente", "OK": "Válido"}
 # documentos que aparecem como coluna (os que bloqueiam e o Pedido de venda, que aparece Válido), nesta ordem: (código no SyncProcess, nome na coluna larga, sigla na coluna estreita)
 _DOCS_ORDEM = [("CNH", "CNH do motorista", "CNH"), ("NFCANHOTO", "NF com canhoto", "NF"), ("CARTATEMP", "Carta de temperatura", "Cart."),
                ("PEDVENDA", "Pedido de venda", "PV"), ("ACEITEPED", "Aceite do pedido", "Ac."), ("PEDCOMPRA", "Pedido de compra", "Ped.")]
 
 
-def _estado_documento(status, bloqueia) -> str:
-    """Estado de um documento pela pendência dele: vencido (bloqueia), validando (revisão), não anexado, pendente ou OK."""
+def _estado_documento(status, doc_status=None) -> str:
+    """Estado do DOCUMENTO como o SyncProcess mostra no selo: Pendente (sem anexo), Em validação (anexado, aguardando revisão), Inválido ou
+    Válido. Vem da validação do documento (DVA_IN_STATUS: 0 = em validação, 1 = válido, 2 = inválido). O bloqueio por prazo vencido é outra
+    coisa (ver `_bloqueando`): um documento Em validação também pode estar bloqueando."""
     st = pd.to_numeric(status, errors="coerce")
     st = int(st) if pd.notna(st) else -1
-    if st in _ABERTOS:
-        bl = pd.to_numeric(bloqueia, errors="coerce")
-        if pd.notna(bl) and int(bl) == 1:
-            return "VENCIDO"
-        return {1: "VALIDANDO", 0: "NAO_ANEXADO"}.get(st, "PENDENTE")
-    return "OK"
+    if st not in _ABERTOS:
+        return "OK"                                 # pendência regularizada: documento válido
+    ds = pd.to_numeric(doc_status, errors="coerce")
+    if pd.notna(ds):
+        return {0: "VALIDANDO", 1: "OK", 2: "INVALIDO"}.get(int(ds), "VALIDANDO")
+    return {0: "NAO_ANEXADO", 1: "VALIDANDO", 2: "INVALIDO"}.get(st, "PENDENTE")    # sem validação: pelo status da própria pendência
+
+
+def _bloqueando(status, bloqueia) -> bool:
+    """O documento está bloqueando a nota agora (pendência aberta com PEN_IN_BLOQUEIA = 1: prazo vencido, bloqueio ativo)."""
+    st = pd.to_numeric(status, errors="coerce")
+    bl = pd.to_numeric(bloqueia, errors="coerce")
+    return bool(pd.notna(st) and int(st) in _ABERTOS and pd.notna(bl) and int(bl) == 1)
 
 
 def _agrupar_notas(x: pd.DataFrame) -> pd.DataFrame:
@@ -153,22 +164,69 @@ def _agrupar_notas(x: pd.DataFrame) -> pd.DataFrame:
         # nome do tipo de documento (a regra); o texto do motivo só como reserva
         nomes_g = g["DOCUMENTO"] if "DOCUMENTO" in g.columns else g["MOTIVO"].map(_nome_documento)
         codigos_g = g["DOC_CODIGO"] if "DOC_CODIGO" in g.columns else nomes_g
-        estados, nomes = {}, {}
-        for c, n, s_, bl in zip(codigos_g, nomes_g, g["STATUS"], g["BLOQUEIA"]):
-            c, e_ = str(c), _estado_documento(s_, bl)
+        estados, nomes, bloqs, anexos, validacoes, apos = {}, {}, {}, {}, {}, {}
+        vazio = [None] * len(g)
+        doc_st = g["DOC_STATUS"] if "DOC_STATUS" in g.columns else vazio
+        anex_g = pd.to_datetime(g["ANEXADO_EM"], errors="coerce") if "ANEXADO_EM" in g.columns else pd.Series([pd.NaT] * len(g), index=g.index)
+        val_g = pd.to_datetime(g["VALIDADO_EM"], errors="coerce") if "VALIDADO_EM" in g.columns else pd.Series([pd.NaT] * len(g), index=g.index)
+        prazo_g = pd.to_datetime(g["PRAZO"], errors="coerce")
+        for c, n, s_, bl, ds, an, va, pz in zip(codigos_g, nomes_g, g["STATUS"], g["BLOQUEIA"], doc_st, anex_g, val_g, prazo_g):
+            c, e_ = str(c), _estado_documento(s_, ds)
             nomes[c] = str(n)
+            bloqs[c] = bloqs.get(c, False) or _bloqueando(s_, bl)
             if _GRAVIDADE[e_] >= _GRAVIDADE.get(estados.get(c), -1):
                 estados[c] = e_
+            if pd.notna(an) and (c not in anexos or an > anexos[c]):
+                anexos[c] = an                                  # quando o documento foi incluído
+            if pd.notna(va) and (c not in validacoes or va > validacoes[c]):
+                validacoes[c] = va
+            if c in _DOCS_ANEXADOS and e_ != "OK" and pd.notna(an) and pd.notna(pz) and an > pz:      # incluído depois do prazo e ainda não válido
+                apos[c] = max(apos.get(c, 0), (an.normalize() - pz.normalize()).days)
         docs = list(dict.fromkeys(str(n) for n in nomes_g[st_g.isin(_ABERTOS)]))
         linhas.append({"COD_CLIENTE": cod, "NF": str(nf), "CONTROLE": str(controle), "TIPO": tipo,
                        "QTD_DOCS": len(abertas), "PRAZO": pd.to_datetime(ref["PRAZO"], errors="coerce").min(), "DOCUMENTOS": docs,
-                       "ESTADOS": estados, "NOMES": nomes})
-    cols = ["COD_CLIENTE", "NF", "CONTROLE", "TIPO", "QTD_DOCS", "PRAZO", "DOCUMENTOS", "ESTADOS", "NOMES"]
+                       "ESTADOS": estados, "NOMES": nomes, "BLOQUEANDO": bloqs, "ANEXADOS": anexos, "VALIDADOS": validacoes,
+                       "APOS_PRAZO": apos,
+                       "ULTIMO_ANEXO": max((v for c, v in anexos.items() if c in _DOCS_ANEXADOS), default=pd.NaT)})
+    cols = ["COD_CLIENTE", "NF", "CONTROLE", "TIPO", "QTD_DOCS", "PRAZO", "DOCUMENTOS", "ESTADOS", "NOMES", "BLOQUEANDO", "ANEXADOS",
+            "VALIDADOS", "APOS_PRAZO", "ULTIMO_ANEXO"]
     out = pd.DataFrame(linhas, columns=cols)
     if out.empty:
         return out
     out["_ordem"] = out["TIPO"].map({"BLOQUEANTE": 0, "MANUAL": 1, "A_VENCER": 2})
     return out.sort_values(["_ordem", "PRAZO", "NF"]).drop(columns="_ordem").reset_index(drop=True)
+
+
+def _quando(ts) -> str:
+    """"13/11 às 21:34" (ou vazio)."""
+    return "" if pd.isna(ts) else f"{pd.Timestamp(ts):%d/%m} às {pd.Timestamp(ts):%H:%M}"
+
+
+def _ha_dias(ts) -> str:
+    """"hoje", "ontem" ou "há N dias" a partir de hoje."""
+    if pd.isna(ts):
+        return ""
+    d = (pd.Timestamp.today().normalize() - pd.Timestamp(ts).normalize()).days
+    return "hoje" if d <= 0 else "ontem" if d == 1 else f"há {d} dias"
+
+
+def dica_documento(r, codigo, nome) -> str:
+    """Texto ao passar o mouse sobre o documento: estado, quando foi incluído/validado, e se entrou depois do prazo ou está bloqueando."""
+    e = r.ESTADOS.get(codigo)
+    linhas = [f"{nome} · {'não se aplica' if e is None else ESTADO_ROTULO[e]}"]
+    if e is not None:
+        an, va = r.ANEXADOS.get(codigo), r.VALIDADOS.get(codigo)
+        linhas.append(f"Incluído em {_quando(an)}" if pd.notna(an) else "Nenhum documento anexado")
+        if pd.notna(va) and e == "OK":
+            linhas.append(f"Validado em {_quando(va)}")
+        elif e == "VALIDANDO":
+            linhas.append("Aguardando revisão manual")
+        dias = r.APOS_PRAZO.get(codigo)
+        if dias is not None and pd.notna(r.PRAZO):
+            linhas.append(f"Anexado {'no mesmo dia, depois do prazo' if dias == 0 else f'{dias} dia(s) após o prazo'} ({pd.Timestamp(r.PRAZO):%d/%m %H:%M})")
+        if r.BLOQUEANDO.get(codigo, False):
+            linhas.append("Bloqueando: prazo vencido")
+    return "\n".join(linhas)
 
 
 def colunas_documentos(notas) -> list:
@@ -221,7 +279,7 @@ def url_controle_venda(controle):
     return URL_CONTROLE_VENDA.format(numero=int(m.group(1))) if m else None
 
 
-_COR_BOLA = {"VENCIDO": "#E24B4A", "VALIDANDO": "#378ADD", "NAO_ANEXADO": "#9ca3af", "PENDENTE": "#9ca3af", "OK": "#22c55e"}
+_COR_BOLA = {"INVALIDO": "#E24B4A", "VALIDANDO": "#378ADD", "NAO_ANEXADO": "#9ca3af", "PENDENTE": "#9ca3af", "OK": "#22c55e"}
 _CSS_NOTAS = ("<style>.pn-box{display:block;container-type:inline-size}"
               ".pn-d{width:14px;height:14px;border-radius:50%;display:inline-block}"
               ".pn-nd{background:transparent;border:1px dashed #4b5563;box-sizing:border-box}"
@@ -247,7 +305,7 @@ def html_notas_pendentes(codigo):
     cor_topo = "#E24B4A" if (notas["TIPO"] == "BLOQUEANTE").any() else "#378ADD"
     linhas = ""
     for r in notas.itertuples(index=False):
-        prazo = (f"<span class='pn-l'>{r.PRAZO.strftime('%d/%m/%Y')}</span><span class='pn-c'>{r.PRAZO.strftime('%d/%m')}</span>"
+        prazo = (f"<span class='pn-l'>{r.PRAZO.strftime('%d/%m/%Y %H:%M')}</span><span class='pn-c'>{r.PRAZO.strftime('%d/%m %H:%M')}</span>"
                  if pd.notna(r.PRAZO) else "—")
         bolas = ""
         for c, nome, _ in cols:
@@ -255,7 +313,9 @@ def html_notas_pendentes(codigo):
             if e_ is None:
                 bolas += f'<span class="pn-d pn-nd" title="{escape(nome, quote=True)}: não se aplica"></span>'
             else:
-                bolas += f'<span class="pn-d" style="background:{_COR_BOLA[e_]}" title="{escape(nome, quote=True)}: {ESTADO_ROTULO[e_]}"></span>'
+                blq = r.BLOQUEANDO.get(c, False)
+                anel = "box-shadow:0 0 0 2px #1e1e2e,0 0 0 3.5px #E24B4A;" if blq else ""
+                bolas += f'<span class="pn-d" style="background:{_COR_BOLA[e_]};{anel}" title="{escape(dica_documento(r, c, nome), quote=True)}"></span>'
         url = url_controle_venda(r.CONTROLE)
         if url:
             nf = (f'<a href="{url}" target="_blank" rel="noopener noreferrer" style="color:#fff;font-weight:500;text-decoration:none" '
@@ -265,7 +325,7 @@ def html_notas_pendentes(codigo):
         linhas += (f'<div style="display:grid;{grade};padding:3px 0;font-size:12px">{nf}{bolas}'
                    f'<span style="color:#aaaaaa;text-align:right;white-space:nowrap">{prazo}</span></div>')
     legenda = ("<span style='color:#ff6b6b'>●</span> inválido &nbsp;<span style='color:#6db3f5'>●</span> em validação &nbsp;"
-               "<span style='color:#9ca3af'>●</span> pendente &nbsp;<span style='color:#22c55e'>●</span> válido")
+               "<span style='color:#9ca3af'>●</span> pendente &nbsp;<span style='color:#22c55e'>●</span> válido &nbsp;(anel vermelho = bloqueando)")
     return (
         f"{_CSS_NOTAS}"
         f'<div style="background:#1e1e2e;border-radius:12px;border-top:4px solid {cor_topo};box-sizing:border-box;padding:16px 18px;'
