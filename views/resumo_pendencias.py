@@ -13,6 +13,7 @@ Só aparece no menu de quem está no grupo fixo "Resumo Pendências" (tela Acess
 import base64
 import datetime
 import threading
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
 
@@ -24,8 +25,8 @@ from utils.exporters import exportar_excel_abas_recebimentos
 
 from services.data_service import (carregar_controles_abertos_mi, carregar_grupo_credito_geral, carregar_grupo_credito_saldo_agente,
                                    carregar_lista_clientes, carregar_notas_pendentes_validacao, carregar_recebido_periodo_mi,
-                                   carregar_recebimento_hoje_mi)
-from utils.pendencias import ESTADO_ROTULO, _ha_dias, _quando, colunas_documentos, dica_documento, notas_pendentes_todas, url_busca_controles, url_controle_venda
+                                   carregar_pedidos_em_validacao, carregar_recebimento_hoje_mi)
+from utils.pendencias import _GRAVIDADE, ESTADO_ROTULO, _ha_dias, _quando, colunas_documentos, dica_documento, notas_pendentes_todas, url_busca_controles, url_controle_venda
 from views.contas_receber import _nomes_curtos, formatar_moeda
 from views.relatorio_boleto_nao_gerado import _status_boleto
 from views.relatorio_desconto_financeiro_pendente import resumo_descontos_pendentes
@@ -54,19 +55,19 @@ _CSS = """<style>
 .rp-barra{height:8px;border-radius:4px;background:rgba(128,128,128,0.18);overflow:hidden;margin:6px 0 4px}
 .rp-barra div{height:100%}
 .rp-lista{background:#1e1e2e;border-radius:12px;border-top:4px solid #E24B4A;padding:14px 18px}
-.rp-q{display:grid;gap:8px;align-items:center;font-size:13px}
-.rp-qh{font-size:11px;color:#8892a4;text-align:center;line-height:1.2;padding-bottom:6px;border-bottom:1px solid #2a2a3a;align-items:end}
+.rp-q{display:grid;gap:8px;align-items:center;font-size:16px}
+.rp-qh{font-size:13.5px;color:#8892a4;text-align:center;line-height:1.2;padding-bottom:6px;border-bottom:1px solid #2a2a3a;align-items:end}
 .rp-q a{color:#fff;font-weight:600;text-decoration:none;white-space:nowrap}.rp-q a:hover{text-decoration:underline;color:#6db3f5}
 .rp-cad{vertical-align:-2px}.rp-cadc{display:flex;align-items:center;justify-content:center}
-.rp-ua{font-size:12px;text-align:center;line-height:1.4;color:#d1d5db;white-space:nowrap;font-weight:500}
+.rp-ua{font-size:14.5px;text-align:center;line-height:1.4;color:#d1d5db;white-space:nowrap;font-weight:500}
 .rp-tag{display:inline-block;margin-top:2px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(245,158,11,.22);color:#f5c070}
 .rp-cli{color:#aab2c5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rp-c{height:24px;border-radius:5px;font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:600}
-.rp-c-INVALIDO{background:rgba(226,75,74,.28);color:#f3a3a2}.rp-c-blq{box-shadow:inset 0 0 0 1.5px #E24B4A}.rp-c-VALIDANDO{background:rgba(55,138,221,.25);color:#8ec2f5}
+.rp-c{height:29px;border-radius:5px;font-size:13.5px;display:flex;align-items:center;justify-content:center;font-weight:600}
+@keyframes rp-pisca{0%,100%{opacity:1}50%{opacity:.3}}@keyframes rp-contorno{0%,100%{box-shadow:inset 0 0 0 1.5px #E24B4A}50%{box-shadow:inset 0 0 0 1.5px rgba(226,75,74,0)}}@keyframes rp-anel{0%{box-shadow:0 0 0 0 rgba(226,75,74,.7)}70%,100%{box-shadow:0 0 0 8px rgba(226,75,74,0)}}.rp-cad-blq{border-radius:50%;animation:rp-anel 1.4s ease-out infinite}.rp-c-INVALIDO{background:rgba(226,75,74,.28);color:#f3a3a2}.rp-c-blq{box-shadow:inset 0 0 0 1.5px #E24B4A;animation:rp-contorno 1.2s ease-in-out infinite}.rp-c-VALIDANDO{background:rgba(55,138,221,.25);color:#8ec2f5}
 .rp-c-NAO_ANEXADO,.rp-c-PENDENTE{background:rgba(156,163,175,.22);color:#d1d5db}
 .rp-c-OK{background:rgba(34,197,94,.16);color:#6fd69a}.rp-c-ND{color:#6b7280;font-weight:400}
 .rp-qr{padding:5px 0;border-bottom:1px solid #26263a}.rp-pz{text-align:right;color:#8892a4;white-space:nowrap}
-@media (max-width:1350px){.rp-q{grid-template-columns:70px 22px minmax(0,1.8fr) repeat(var(--rpn),minmax(0,1fr)) 100px 104px !important}.rp-c{font-size:10px;padding:0 2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:block;line-height:24px;text-align:center}}
+@media (max-width:1350px){.rp-q{grid-template-columns:70px 22px minmax(0,1.8fr) repeat(var(--rpn),minmax(0,1fr)) 92px 96px 100px !important}.rp-c{font-size:11px;padding:0 2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:block;line-height:29px;text-align:center}}
 @media (max-width:760px){.rp-cli,.rp-pz{display:none}}
 </style>"""
 
@@ -178,7 +179,7 @@ def _card_notas(notas) -> str:
         return _indisponivel(titulo)
     if notas.empty:
         return _card(titulo, "Pendentes", 0, "nota(s)", _VERDE, "Nenhuma pendência", "&nbsp;", "todas as notas validadas")
-    notas = notas[notas["TIPO"] != "A_VENCER"]      # o card conta só bloqueante e validação manual; as notas a vencer ficam no quadro
+    notas = notas[~notas["TIPO"].isin(["A_VENCER", "PEDIDO"])]      # o card conta só bloqueante e validação manual de NOTAS; a vencer e pedidos ficam no quadro
     if notas.empty:
         return _card(titulo, "Pendentes", 0, "nota(s)", _VERDE, "Nenhuma pendência", "&nbsp;", "todas as notas validadas")
     bloq = notas[notas["TIPO"] == "BLOQUEANTE"]
@@ -242,7 +243,7 @@ def _cadeado(cor: str, aberto: bool, rotulo: str) -> str:
                  f'<path d="M5 7V5a3 3 0 0 1 6 0v2" fill="none" stroke="{cor}" stroke-width="1.6"/>')
     svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14">{corpo}</svg>'
     uri = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
-    return f'<img class="rp-cad" src="{uri}" width="14" height="14" alt="{rotulo}" title="{rotulo}">'
+    return f'<img class="rp-cad{"" if aberto else " rp-cad-blq"}" src="{uri}" width="14" height="14" alt="{rotulo}" title="{rotulo}">'
 
 
 def _relogio_alerta(cor: str = "#f5c070") -> str:
@@ -279,6 +280,59 @@ def _credito_por_cliente() -> dict:
         return {}
 
 
+def _norm(txt) -> str:
+    """Texto para pesquisa: sem acento, sem maiúscula, sem espaço sobrando."""
+    return "".join(c for c in unicodedata.normalize("NFKD", str(txt or "")) if not unicodedata.combining(c)).casefold().strip()
+
+
+def _estado_pedido(status, doc_status, motivo) -> str:
+    """Estado do aceite do pedido / pedido de compra: Inválido (documento recusado), Em validação ou Pendente (sem documento)."""
+    ds = pd.to_numeric(doc_status, errors="coerce")
+    if pd.notna(ds):
+        return {0: "VALIDANDO", 1: "OK", 2: "INVALIDO"}.get(int(ds), "VALIDANDO")
+    if "invalid" in _norm(motivo):
+        return "INVALIDO"
+    st_ = pd.to_numeric(status, errors="coerce")
+    return "VALIDANDO" if pd.notna(st_) and int(st_) == 1 else "NAO_ANEXADO"
+
+
+def _pedidos_em_validacao():
+    """Pedidos ainda sem nota com o pedido de compra do cliente ou o aceite do pedido pendente/inválido, no mesmo formato das notas (uma
+    linha por pedido, TIPO = "PEDIDO", ROTULO = "Pedido 21834"). Os mais antigos primeiro. None se o banco não respondeu."""
+    df = carregar_pedidos_em_validacao()
+    if df is None:
+        return None
+    cols = ["COD_CLIENTE", "NF", "CONTROLE", "TIPO", "QTD_DOCS", "PRAZO", "DOCUMENTOS", "ESTADOS", "NOMES", "BLOQUEANDO", "ANEXADOS", "VALIDADOS",
+            "APOS_PRAZO", "ULTIMO_ANEXO", "EMISSAO", "ROTULO", "GERADA"]
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    linhas = []
+    for (cod, controle, pedido), g in df.groupby(["COD_CLIENTE", "CONTROLE", "PEDIDO"], dropna=False):
+        estados, nomes = {}, {}
+        for c, nome, st_, ds, mot in zip(g["DOC_CODIGO"], g["DOCUMENTO"], g["STATUS"], g["DOC_STATUS"], g["MOTIVO"]):
+            c, e = str(c), _estado_pedido(st_, ds, mot)
+            nomes[c] = str(nome)
+            if _GRAVIDADE[e] >= _GRAVIDADE.get(estados.get(c), -1):
+                estados[c] = e
+        if "INVALIDO" in estados.values():      # pedido inválido é cancelado (não gera venda); o cliente precisa emitir outro, então não é pendência
+            continue
+        linhas.append({"COD_CLIENTE": cod, "NF": "", "CONTROLE": str(controle), "TIPO": "PEDIDO", "QTD_DOCS": len(estados), "PRAZO": pd.NaT,
+                       "DOCUMENTOS": list(nomes.values()), "ESTADOS": estados, "NOMES": nomes, "BLOQUEANDO": {}, "ANEXADOS": {}, "VALIDADOS": {},
+                       "APOS_PRAZO": {}, "ULTIMO_ANEXO": pd.NaT, "EMISSAO": pd.NaT, "ROTULO": f"Pedido {int(pedido)}" if pd.notna(pedido) else "Pedido",
+                       "GERADA": pd.to_datetime(g["GERADA"], errors="coerce").min()})
+    return pd.DataFrame(linhas, columns=cols).sort_values("GERADA", na_position="last").reset_index(drop=True)
+
+
+def _filtrar_busca(d: pd.DataFrame, busca: str, nomes: dict) -> pd.DataFrame:
+    """Pesquisa por cliente (nome ou código), nota, pedido ou controle: todas as palavras digitadas precisam aparecer."""
+    termos = [t for t in _norm(busca).split() if t]
+    if not termos or d.empty:
+        return d
+    palheiro = [_norm(f"{nomes.get(str(int(float(c))), '')} {int(float(c))} {rot} {nf} {ctrl}")
+                for c, rot, nf, ctrl in zip(d["COD_CLIENTE"], d["ROTULO"], d["NF"], d["CONTROLE"])]
+    return d[[all(t in p for t in termos) for p in palheiro]]
+
+
 def _para_desbloquear(notas) -> pd.DataFrame | None:
     """Clientes para analisar o desbloqueio: o grupo dele está bloqueado no Grupo de Crédito (bloqueado, cadastro bloqueado,
     inadimplente ou suspenso), ele tem controle de venda ABERTO e NENHUM cliente do grupo tem pendência em documento que bloqueia
@@ -293,7 +347,7 @@ def _para_desbloquear(notas) -> pd.DataFrame | None:
         if "PAIS" in agentes.columns:                                   # a gestão documental só existe no Mercado Interno
             agentes = agentes[agentes["PAIS"].astype(str).str.upper() == "BRA"]
         grupo_de = {str(int(float(c))): g for c, g in zip(agentes["COD_AGENTE"], agentes["COD_GRUPO"])}
-        com_pendencia = notas[notas["TIPO"] != "A_VENCER"]       # nota a vencer (só sem anexo) ainda não bloqueia
+        com_pendencia = notas[~notas["TIPO"].isin(["A_VENCER", "PEDIDO"])]       # nota a vencer (só sem anexo) e pedido sem nota ainda não bloqueiam
         grupos_com_nota = {grupo_de[str(int(float(c)))] for c in com_pendencia["COD_CLIENTE"] if str(int(float(c))) in grupo_de} if not com_pendencia.empty else set()
         por_cliente = {}
         for c, controle, nf in zip(ctrl["COD_CLIENTE"], ctrl["CONTROLE"], ctrl["NF"]):
@@ -340,35 +394,45 @@ def _html_para_desbloquear(df) -> str:
             f'scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>{rodape}</div>')
 
 
-def _grafico_notas(notas, filtro: str) -> str:
+def _grafico_notas(notas, filtro: str, cliente: str | None = None) -> str:
     """Quadro das notas pendentes: uma linha por nota e uma coluna por documento que bloqueia (vermelho = vencido, azul = validando,
     âmbar = não anexado, verde = OK, traço = a regra não vale para a nota). Aparece só a coluna do documento que tem alguma nota."""
     nomes = _nomes_clientes()
     credito = _credito_por_cliente()
-    tipo = {"Bloqueantes": "BLOQUEANTE", "Validação manual": "MANUAL", "A vencer (sem anexo)": "A_VENCER"}.get(filtro)
-    d = notas if tipo is None else notas[notas["TIPO"] == tipo]
+    tipos = {"Bloqueantes": ["BLOQUEANTE"], "Validação manual": ["MANUAL", "PEDIDO"], "A vencer (sem anexo)": ["A_VENCER"]}.get(filtro)
+    d = notas if tipos is None else notas[notas["TIPO"].isin(tipos)]
+    total_aba = len(d)
+    if cliente:                                           # cliente escolhido no seletor: só as notas e pedidos dele
+        d = d[d["COD_CLIENTE"].map(lambda c: str(int(float(c)))) == str(cliente)]
     n_av = int((d["TIPO"] == "A_VENCER").sum())
+    n_ped = int((d["TIPO"] == "PEDIDO").sum())
+    n_nota = len(d) - n_ped
     cabeca = ('<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
               '<span style="color:#e0e0e0;font-size:14px;font-weight:600">Notas pendentes de validação · todos os clientes</span>'
-              f'<span style="font-size:11px;color:#8892a4">{len(d)} nota(s)' + (f' ({n_av} a vencer, sem anexo)' if n_av else '')
+              f'<span style="font-size:11px;color:#8892a4">{n_nota} nota(s)' + (f' ({n_av} a vencer, sem anexo)' if n_av else '')
+              + (f' · {n_ped} pedido(s) ainda sem nota' if n_ped else '')
+              + (f' · cliente: {len(d)} de {total_aba}' if cliente else '')
               + ' · documentos que bloqueiam e o pedido de venda</span></div>')
     if d.empty:
-        return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Nenhuma nota neste filtro.</span></div>'
+        return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Nenhuma nota ou pedido neste filtro.</span></div>'
     cols = colunas_documentos(d)
-    grade = (f"grid-template-columns:70px 22px minmax(150px,1fr) repeat({len(cols)},minmax(86px,98px)) 124px 128px;--rpn:{len(cols)}")   # cartões dos documentos estreitos: sobra espaço para o nome do cliente
-    topo = (f'<div class="rp-q rp-qh" style="{grade}"><span style="text-align:left">NF</span><span class="rp-cadc"></span><span class="rp-cli" style="text-align:left">Cliente</span>'
+    grade = (f"grid-template-columns:70px 22px minmax(150px,1fr) repeat({len(cols)},minmax(104px,116px)) 124px 128px 128px;--rpn:{len(cols)}")   # cartões dos documentos estreitos: sobra espaço para o nome do cliente
+    topo = (f'<div class="rp-q rp-qh" style="{grade}"><span style="text-align:left">NF / Pedido</span><span class="rp-cadc"></span><span class="rp-cli" style="text-align:left">Cliente</span>'
             + "".join(f'<span title="{escape(nome, quote=True)}">{escape(nome)}</span>' for _, nome, _ in cols)
-            + '<span>Último anexo</span><span class="rp-pz">Prazo</span></div>')
+            + '<span>Último anexo</span><span class="rp-pz">Emissão da NF</span><span class="rp-pz">Prazo</span></div>')
     linhas = ""
     for r in d.itertuples(index=False):
         cli = nomes.get(str(int(float(r.COD_CLIENTE))), f"Cliente {r.COD_CLIENTE}")
         prazo = r.PRAZO.strftime("%d/%m/%Y %H:%M") if pd.notna(r.PRAZO) else "—"
+        emissao = pd.Timestamp(r.EMISSAO).strftime("%d/%m/%Y %H:%M") if pd.notna(r.EMISSAO) else "—"
+        dica_pz = (f' title="Prazo de {(pd.Timestamp(r.PRAZO) - pd.Timestamp(r.EMISSAO)).total_seconds() / 86400:.0f} dias após a emissão da NF"'
+                   if pd.notna(r.EMISSAO) and pd.notna(r.PRAZO) else "")
         bloqueado = credito.get(str(int(float(r.COD_CLIENTE))))
         cad = "" if bloqueado is None else (_CADEADO_FECHADO if bloqueado else _CADEADO_ABERTO)
         url = url_controle_venda(r.CONTROLE)
         dica = escape(f"{cli} · {r.CONTROLE}", quote=True)
-        nf = (f'<a href="{url}" target="_blank" rel="noopener noreferrer" title="{dica}">NF {escape(r.NF)}</a>' if url
-              else f'<span style="color:#fff;font-weight:600" title="{dica}">NF {escape(r.NF)}</span>')
+        nf = (f'<a href="{url}" target="_blank" rel="noopener noreferrer" title="{dica}">{escape(r.ROTULO)}</a>' if url
+              else f'<span style="color:#fff;font-weight:600" title="{dica}">{escape(r.ROTULO)}</span>')
         celulas = ""
         for c, nome, _ in cols:
             e_ = r.ESTADOS.get(c)
@@ -385,10 +449,12 @@ def _grafico_notas(notas, filtro: str) -> str:
                        + (f" ({pd.Timestamp(r.PRAZO):%d/%m %H:%M})" if pd.notna(r.PRAZO) else ""))
             ultimo = f'<span class="rp-ua" style="color:{cor_ua}" title="{escape(dica_ua, quote=True)}">{_RELOGIO_ALERTA if apos else ""}{_ha_dias(r.ULTIMO_ANEXO)}</span>'
         else:
-            ultimo = '<span class="rp-ua" style="color:#6b7280">sem anexo</span>'
+            ger = getattr(r, "GERADA", pd.NaT)
+            dica_g = f' title="Pedido gerado em {pd.Timestamp(ger):%d/%m/%Y} ({_ha_dias(ger)})"' if r.TIPO == "PEDIDO" and pd.notna(ger) else ""
+            ultimo = f'<span class="rp-ua" style="color:#6b7280"{dica_g}>sem anexo</span>'
         linhas += (f'<div class="rp-q rp-qr" style="{grade}">{nf}<span class="rp-cadc">{cad}</span><span class="rp-cli" title="Abrir os controles de venda de {escape(cli, quote=True)} no SyncProcess">'
                    f'<a href="{url_busca_controles(cli)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">{escape(cli)}</a></span>'
-                   f'{celulas}{ultimo}<span class="rp-pz">{prazo}</span></div>')
+                   f'{celulas}{ultimo}<span class="rp-pz">{emissao}</span><span class="rp-pz"{dica_pz}>{prazo}</span></div>')
     legenda = ('<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#8892a4;margin-top:10px">'
                '<span><span style="color:#E24B4A">●</span> inválido</span><span><span style="color:#378ADD">●</span> em validação</span>'
                '<span><span style="color:#9ca3af">●</span> pendente (sem documento)</span><span><span style="color:#22c55e">●</span> válido</span>'
@@ -417,8 +483,8 @@ def _excel(notas, desbloquear) -> bytes:
     linhas = []
     for r in (notas.itertuples(index=False) if notas is not None else []):
         cod, nome, cred = cliente(r.COD_CLIENTE)
-        linha = {"NF": r.NF, "Controle": r.CONTROLE, "Cód. Cliente": cod, "Cliente": nome, "Crédito": cred,
-                 "Situação da nota": {"BLOQUEANTE": "Bloqueante", "MANUAL": "Validação manual"}.get(r.TIPO, "A vencer (sem anexo)")}
+        linha = {"NF / Pedido": r.ROTULO, "Controle": r.CONTROLE, "Cód. Cliente": cod, "Cliente": nome, "Crédito": cred,
+                 "Situação da nota": {"BLOQUEANTE": "Bloqueante", "MANUAL": "Validação manual", "PEDIDO": "Pedido sem nota (em validação)"}.get(r.TIPO, "A vencer (sem anexo)")}
         for c, nome_doc, _ in cols_doc:
             e = r.ESTADOS.get(c)
             linha[nome_doc] = "—" if e is None else ESTADO_ROTULO[e] + (" (bloqueando)" if r.BLOQUEANDO.get(c, False) else "")
@@ -426,9 +492,10 @@ def _excel(notas, desbloquear) -> bytes:
             linha[f"{nome_doc} · anexado em"] = _prazo_txt(r.ANEXADOS.get(c, pd.NaT))
         linha["Último anexo"] = _prazo_txt(r.ULTIMO_ANEXO)
         linha["Situação do anexo"] = "Após o prazo" if r.APOS_PRAZO else ("No prazo" if pd.notna(r.ULTIMO_ANEXO) else "")
+        linha["Emissão da NF"] = _prazo_txt(r.EMISSAO)
         linha["Prazo"] = _prazo_txt(r.PRAZO)
         linhas.append(linha)
-    base = ["NF", "Controle", "Cód. Cliente", "Cliente", "Crédito", "Situação da nota"] + [n for _, n, _ in cols_doc] + [f"{n} · anexado em" for _, n, _ in cols_doc] + ["Último anexo", "Situação do anexo", "Prazo"]
+    base = ["NF / Pedido", "Controle", "Cód. Cliente", "Cliente", "Crédito", "Situação da nota"] + [n for _, n, _ in cols_doc] + [f"{n} · anexado em" for _, n, _ in cols_doc] + ["Último anexo", "Situação do anexo", "Emissão da NF", "Prazo"]
     notas_df = pd.DataFrame(linhas, columns=base)
 
     if desbloquear is None or desbloquear.empty:
@@ -439,7 +506,7 @@ def _excel(notas, desbloquear) -> bytes:
                              for r in desbloquear.itertuples(index=False)])
     return exportar_excel_abas_recebimentos([
         {"nome": "Notas pendentes", "titulo": f"Notas pendentes de validação (documentos que bloqueiam e pedido de venda) - posição em {hoje}",
-         "df": notas_df, "centro": ("NF", "Cód. Cliente", "Crédito", "Prazo") + tuple(n for _, n, _ in cols_doc)},
+         "df": notas_df, "centro": ("NF / Pedido", "Cód. Cliente", "Crédito", "Emissão da NF", "Prazo") + tuple(n for _, n, _ in cols_doc)},
         {"nome": "Para desbloquear", "titulo": f"Para desbloquear: bloqueados no crédito, com controle aberto e sem pendência documental - posição em {hoje}",
          "df": desb, "centro": ("Cód. Cliente", "Controles abertos")},
     ])
@@ -457,7 +524,7 @@ def _pre_carregar() -> None:
     hoje = datetime.date.today()
     tarefas = [(carregar_notas_pendentes_validacao, ()), (carregar_controles_abertos_mi, ()), (carregar_grupo_credito_geral, ()),
                (carregar_grupo_credito_saldo_agente, ()), (carregar_lista_clientes, ()), (carregar_recebido_periodo_mi, (hoje, hoje)),
-               (carregar_recebimento_hoje_mi, ())]
+               (carregar_recebimento_hoje_mi, ()), (carregar_pedidos_em_validacao, ())]
 
     def rodar(f, args):
         if ctx is not None and add_script_run_ctx is not None:
@@ -495,6 +562,11 @@ def render(df_cr: pd.DataFrame) -> None:
     with st.spinner("Montando o resumo..."):
         _pre_carregar()
         notas = notas_pendentes_todas()
+        if notas is not None:
+            notas = notas.assign(ROTULO="NF " + notas["NF"].astype(str), GERADA=pd.NaT)
+            pedidos = _pedidos_em_validacao()                  # pedidos ainda sem nota: entram na Validação manual e em Todas
+            if pedidos is not None and not pedidos.empty:
+                notas = pd.concat([notas, pedidos], ignore_index=True)
         cards = [_card_descontos(df_cr), _card_boletos(df_cr), _card_notas(notas), _card_esperado_recebido(df_cr, ocultar)]
     st.html(_CSS + '<div class="rp-grade">' + "".join(cards) + "</div>")
 
@@ -502,9 +574,16 @@ def render(df_cr: pd.DataFrame) -> None:
         st.info("Não foi possível consultar as notas pendentes de validação agora.")
         return
     desbloquear = _para_desbloquear(notas)
+    n_vm = int(notas["TIPO"].isin(["MANUAL", "PEDIDO"]).sum())
     filtro = st.segmented_control("Notas", ["Todas", "Bloqueantes", "Validação manual", "A vencer (sem anexo)"], default="Todas",
-                                  key="rp_filtro", label_visibility="collapsed") or "Todas"
-    st.html(_CSS + _grafico_notas(notas, filtro))
+                                  key="rp_filtro", label_visibility="collapsed",
+                                  format_func=lambda o: f"Validação manual ({n_vm})" if o == "Validação manual" else o) or "Todas"
+    # seletor de cliente igual ao da Situação Cliente: escolher mostra só o cliente; limpar (x) volta a mostrar todos. Vale para todas as abas.
+    nomes_cli = _nomes_clientes()
+    codigos = sorted({str(int(float(c))) for c in notas["COD_CLIENTE"] if pd.notna(c)}, key=lambda c: nomes_cli.get(c, c).upper())
+    cliente = st.selectbox("Cliente:", codigos, index=None, key="rp_cliente", placeholder="Buscar cliente por código ou nome...",
+                           format_func=lambda c: f"{nomes_cli.get(c, 'Cliente ' + c)} - {c}")
+    st.html(_CSS + _grafico_notas(notas, filtro, cliente))
     with c_xls:
         botao_exportar_excel(lambda: _excel(notas, desbloquear), f"Resumo_Pendencias_{datetime.date.today():%Y%m%d}.xlsx",
                              key="rp_excel", use_container_width=True, label="Excel",

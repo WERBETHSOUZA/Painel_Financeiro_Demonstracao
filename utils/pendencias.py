@@ -187,9 +187,10 @@ def _agrupar_notas(x: pd.DataFrame) -> pd.DataFrame:
                        "QTD_DOCS": len(abertas), "PRAZO": pd.to_datetime(ref["PRAZO"], errors="coerce").min(), "DOCUMENTOS": docs,
                        "ESTADOS": estados, "NOMES": nomes, "BLOQUEANDO": bloqs, "ANEXADOS": anexos, "VALIDADOS": validacoes,
                        "APOS_PRAZO": apos,
-                       "ULTIMO_ANEXO": max((v for c, v in anexos.items() if c in _DOCS_ANEXADOS), default=pd.NaT)})
+                       "ULTIMO_ANEXO": max((v for c, v in anexos.items() if c in _DOCS_ANEXADOS), default=pd.NaT),
+                       "EMISSAO": pd.to_datetime(g["EMISSAO"], errors="coerce").min() if "EMISSAO" in g.columns else pd.NaT})
     cols = ["COD_CLIENTE", "NF", "CONTROLE", "TIPO", "QTD_DOCS", "PRAZO", "DOCUMENTOS", "ESTADOS", "NOMES", "BLOQUEANDO", "ANEXADOS",
-            "VALIDADOS", "APOS_PRAZO", "ULTIMO_ANEXO"]
+            "VALIDADOS", "APOS_PRAZO", "ULTIMO_ANEXO", "EMISSAO"]
     out = pd.DataFrame(linhas, columns=cols)
     if out.empty:
         return out
@@ -213,6 +214,9 @@ def _ha_dias(ts) -> str:
 def dica_documento(r, codigo, nome) -> str:
     """Texto ao passar o mouse sobre o documento: estado, quando foi incluído/validado, e se entrou depois do prazo ou está bloqueando."""
     e = r.ESTADOS.get(codigo)
+    if codigo == "ACEITEPED" and e == "OK":                       # aceite do pedido confirmado pelo cliente (WhatsApp)
+        va = r.VALIDADOS.get(codigo)
+        return f"{nome} · Aceite confirmado" + (f"\nConfirmado em {_quando(va)}" if pd.notna(va) else "")
     linhas = [f"{nome} · {'não se aplica' if e is None else ESTADO_ROTULO[e]}"]
     if e is not None:
         an, va = r.ANEXADOS.get(codigo), r.VALIDADOS.get(codigo)

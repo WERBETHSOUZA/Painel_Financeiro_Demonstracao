@@ -171,10 +171,10 @@ def carregar_notas_pendentes_validacao():
                 else:
                     status, bloqueia, motivo = 0, 0, f"Documento obrigatório {nome} ainda não foi anexado ao checklist."
                 linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": status, "BLOQUEIA": bloqueia,
-                               "PRAZO": prazo, "MOTIVO": motivo, "DOC_CODIGO": codigo, "DOCUMENTO": nome, "DOC_STATUS": doc_status,
+                               "PRAZO": prazo, "EMISSAO": prazo - pd.Timedelta(days=7), "MOTIVO": motivo, "DOC_CODIGO": codigo, "DOCUMENTO": nome, "DOC_STATUS": doc_status,
                                "ANEXADO_EM": anexado, "VALIDADO_EM": validado, "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual"), "NOTA_AVENCER": int(tipo == "avencer")})
             # o Pedido de venda (não bloqueia) aparece como Válido, gerado automaticamente
-            linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": 3, "BLOQUEIA": 0, "PRAZO": pd.NaT,
+            linhas.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": str(nf), "STATUS": 3, "BLOQUEIA": 0, "PRAZO": pd.NaT, "EMISSAO": prazo - pd.Timedelta(days=7),
                            "MOTIVO": "Pedido de venda gerado automaticamente pelo MEGA/SyncProcess", "DOC_CODIGO": "PEDVENDA",
                            "DOCUMENTO": "Pedido de venda", "DOC_STATUS": 1,
                            "ANEXADO_EM": hoje - pd.Timedelta(days=int(rng.randint(3, 9))), "VALIDADO_EM": hoje - pd.Timedelta(days=int(rng.randint(2, 8))), "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual"),
@@ -194,6 +194,25 @@ def carregar_controles_abertos_mi():
         for _ in range(n):
             nf += int(rng.randint(3, 25))
             linhas.append({"COD_CLIENTE": cod, "CONTROLE": f"CTV-2026-{nf + 3000:06d}", "NF": str(nf)})
+    df = pd.DataFrame(linhas)
+    df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def carregar_pedidos_em_validacao():
+    """Pedidos ainda sem nota com o pedido de compra do cliente ou o aceite do pedido pendente/inválido (COD_CLIENTE, CONTROLE, PEDIDO,
+    DOC_CODIGO, DOCUMENTO, STATUS, DOC_STATUS, MOTIVO, GERADA), inventados."""
+    hoje = pd.Timestamp(date.today())
+    itens = [(1102, "ACEITEPED", "Aceite do Pedido de Venda", 0, None, "Documento Aceite do Pedido de Venda foi considerado inválido para a regra.", 21),
+             (1104, "ACEITEPED", "Aceite do Pedido de Venda", 0, None, "Documento obrigatório Aceite do Pedido de Venda ainda não foi anexado ao checklist.", 16),
+             (1302, "PEDCOMPRA", "Pedido de Compra - Cliente", 0, None, "Documento obrigatório Pedido de Compra - Cliente ainda não foi anexado ao checklist.", 0),
+             (1101, "ACEITEPED", "Aceite do Pedido de Venda", 0, None, "Documento Aceite do Pedido de Venda foi considerado inválido para a regra.", 38),
+             (1103, "ACEITEPED", "Aceite do Pedido de Venda", 0, None, "Documento obrigatório Aceite do Pedido de Venda ainda não foi anexado ao checklist.", 9)]
+    linhas = []
+    for i, (cod, dc, nome, st_, ds, mot, dias) in enumerate(itens):
+        linhas.append({"COD_CLIENTE": cod, "CONTROLE": f"CTV-2026-{4100 + i * 37:06d}", "PEDIDO": 21000 + i * 211, "DOC_CODIGO": dc, "DOCUMENTO": nome,
+                       "STATUS": st_, "DOC_STATUS": ds, "MOTIVO": mot, "GERADA": hoje - pd.Timedelta(days=dias)})
     df = pd.DataFrame(linhas)
     df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
     return df
