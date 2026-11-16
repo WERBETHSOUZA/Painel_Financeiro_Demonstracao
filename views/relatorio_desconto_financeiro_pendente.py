@@ -35,7 +35,8 @@ _COLUNAS = {
     "STATUS":         "STATUS",
 }
 _COLUNAS_MULTILINHA = ("LANCAMENTOS_DESCONTO",)
-_STATUS_ERRO = ("CLASSE LANÇADA INCORRETA", "LANÇADO A MENOR", "LANÇADO A MAIOR", "CLASSE SEM DESCONTO")
+_STATUS_SEM_CLASSE = "SEM CLASSE DEFINIDA"   # a classe de receita da NF não está na tabela config/classes_desconto.py: aparece sempre, com este motivo
+_STATUS_ERRO = ("CLASSE LANÇADA INCORRETA", "LANÇADO A MENOR", "LANÇADO A MAIOR", _STATUS_SEM_CLASSE)
 _STATUS_OPCOES = ["PENDENTE", "APLICADO"]   # PENDENTE = tudo que não é APLICADO
 _REGRAS_STATUS = REGRAS_STATUS_DESCONTO + [(e, "FFC7CE", "9C0006") for e in _STATUS_ERRO]   # vermelho
 # DESC_APLIC_FIN / PERC_APLIC_FIN não entram: este relatório já é só o que está
@@ -130,7 +131,9 @@ def _montar_classes(df: pd.DataFrame) -> pd.DataFrame:
             df.at[i, "LANCADO_MEGA"] = "\n".join(linhas_l)
             df.at[i, "STATUS"] = _conferir(por_desc, pago, bool(sem))
         elif sem:
-            df.at[i, "STATUS"] = "CLASSE SEM DESCONTO"
+            df.at[i, "STATUS"] = _STATUS_SEM_CLASSE
+        if sem:                                   # classe sem destino na tabela: o motivo é este, mesmo que haja lançamento ou outras classes
+            df.at[i, "STATUS"] = _STATUS_SEM_CLASSE
     return df
 
 
@@ -151,7 +154,7 @@ def resumo_descontos_pendentes(df_cr: pd.DataFrame) -> dict | None:
     except Exception:
         return None
     fechado = pd.to_datetime(f["ENTRADA"], errors="coerce") < pd.Timestamp.today().normalize().replace(day=1)
-    f = f[~(f["STATUS"].isin(_STATUS_ERRO) & fechado)]
+    f = f[~(f["STATUS"].isin(_STATUS_ERRO) & (f["STATUS"] != _STATUS_SEM_CLASSE) & fechado)]
     pend = f[f["STATUS"] == "PENDENTE"].sort_values("DESCONTO_A_APLICAR", ascending=False)
     por_cliente = (
         pend.groupby("COD_CLIENTE").agg(CLIENTE=("CLIENTE", "first"), QTD=("NF", "size"), DESC=("DESCONTO_A_APLICAR", "sum"))
@@ -177,7 +180,7 @@ def _conferir(esperado: dict, pago: dict, sem_classe: bool) -> str:
         return "LANÇADO A MENOR"
     if any(pago[c] > esperado[c] + 0.05 for c in pago):
         return "LANÇADO A MAIOR"
-    return "CLASSE SEM DESCONTO" if sem_classe else "APLICADO"
+    return _STATUS_SEM_CLASSE if sem_classe else "APLICADO"
 
 
 # Layout do relatório no Excel (igual à planilha do usuário): largura, alinhamento horizontal do
@@ -288,7 +291,8 @@ def render(df_cr: pd.DataFrame) -> None:
     # corrigir, então sai do relatório. Vale a data de ENTRADA da NF contra o mês atual.
     inicio_mes = pd.Timestamp.today().normalize().replace(day=1)
     fechado = pd.to_datetime(df_filtrado["ENTRADA"], errors="coerce") < inicio_mes
-    df_filtrado = df_filtrado[~(df_filtrado["STATUS"].isin(_STATUS_ERRO) & fechado)]
+    # (exceção: "sem classe definida" nunca some, é cadastro faltando e não erro contábil do mês)
+    df_filtrado = df_filtrado[~(df_filtrado["STATUS"].isin(_STATUS_ERRO) & (df_filtrado["STATUS"] != _STATUS_SEM_CLASSE) & fechado)]
     if df_filtrado.empty:
         st.success("Nenhum título com regra de desconto financeiro no período em aberto.")
         return

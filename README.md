@@ -254,7 +254,7 @@ Títulos do **Mercado Interno** pagos, vencidos e a vencer, com data de pagament
 Títulos do Mercado Interno sem boleto gerado, com status Liberado ou Bloqueado (desconto da regra ainda não aplicado). **Clientes que pagam por transferência** (cadastrados em Admin > Clientes por Transferência) não entram, e uma linha no topo informa quem foi deixado de fora.
 
 #### 📄 Descontos Contratuais Pendentes MI *(área Contas a Receber)*
-Mercado Interno, regra Financeiro: os descontos contratuais ainda não aplicados, com a classe de desconto a lançar.
+Mercado Interno, regra Financeiro: os descontos contratuais ainda não aplicados, com a classe de desconto a lançar. Quando a classe de receita da NF **não está na tabela** `config/classes_desconto.py`, o título aparece com o status **SEM CLASSE DEFINIDA** (o motivo, em vermelho), e **nunca some**, nem quando a entrada é de um mês encerrado (os outros erros de mês encerrado continuam fora do relatório). A coluna de classes mostra qual classe falta (`SEM CLASSE: 1749`).
 
 #### 📄 Descontos Realizados *(área Movimento Financeiro)*
 Descontos já realizados (ação 948) do Mercado Interno e do Externo, por período: contratuais, operacionais e concedidos.
