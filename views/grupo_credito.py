@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from components.buttons import botao_exportar_excel, botoes_acao_row
 from components.cards import card_html, render_cards_row, render_tabela_html, situacao_faturamento
-from utils.pendencias import card_pendencias, fundo_por_cor
+from utils.pendencias import card_pendencias, fundo_por_cor, html_notas_pendentes
 from utils.exporters import exportar_excel
 from utils.mercado import sufixo_mercado
 from utils.imagem_email import gerar_imagem_resumo_titulos
@@ -314,7 +314,7 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
     _cartao = partial(card_html, largura="100%", altura="112px", padding="14px 20px", topo=True)
     _ADTO = object()   # no lugar do card de adiantamento, que leva o botão de atualizar por cima
     _DOC = object()    # no lugar da Situação Documental (gestão documental do SyncProcess: só existe no Mercado Interno)
-    _externo_gc = sufixo_mercado(_titulos_sit_fat) == " - Mercado Externo"
+    _externo_gc = sufixo_mercado(_titulos_sit_fat) == " - MERCADO EXTERNO"
     _cards_gc = [
         _cartao("Limite de crédito total", _formatar_moeda(limite_total), cor_borda="#6366f1"),
         _cartao("Limite de crédito disponível", _formatar_moeda(limite_disponivel),
@@ -392,12 +392,19 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
     st.divider()
 
     # ── Gráfico do limite de crédito (painel compacto com rosca) ────────────
+    # Notas com documento pendente de algum cliente do grupo: o mesmo card da Situação Cliente, numa linha abaixo dos gráficos (só aparece se houver nota)
+    _html_pend = None
+    if not df_clientes.empty and "COD_AGENTE" in df_clientes.columns:
+        _nomes_cli = {str(int(float(c))): str(n) for c, n in zip(df_clientes["COD_AGENTE"], df_clientes.get("NOME_AGENTE", df_clientes["COD_AGENTE"])) if pd.notna(c)}
+        _html_pend = html_notas_pendentes(list(_nomes_cli), nomes=_nomes_cli)
     _col_graf, _col_cons = st.columns([2, 3])
     with _col_graf:
         st.html(html_situacao_limite(limite_total, limite_disponivel, consumido_nf, consumido_pv,
                                      titulo="Gráfico do limite de crédito"))
     with _col_cons:
         st.html(_html_consumo_por_cliente(df_clientes, limite_total))
+    if _html_pend:                                          # linha própria, na largura toda, para o prazo e o nome do cliente não ficarem cortados
+        st.html(_html_pend)
 
     st.divider()
 

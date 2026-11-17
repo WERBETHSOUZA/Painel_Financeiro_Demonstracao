@@ -328,7 +328,7 @@ def render(
             m for m in df_cliente["MOEDA"].dropna().unique() if m != "R$"
         )
 
-    st.subheader(f"CLIENTE - {cliente_sel}{sufixo_mercado(df_cliente)}")
+    st.subheader(f"{codigo_agente} - {cliente_sel}{sufixo_mercado(df_cliente)}")     # código - cliente - mercado
 
     # ── Cards de resumo ─────────────────────────────────────────────────────
     # Títulos em reais do cliente (notas de complemento): não têm valor na moeda estrangeira.
@@ -362,7 +362,7 @@ def render(
     # com a quantidade de títulos em aberto), a vencer, vencido (cada um com a sua quantidade), inadimplência, adiantamento
     # (botão preso ao próprio card), situação documental, status e, só no Mercado Interno, a regra de desconto.
     _qtd_a_vencer = int((df_cliente["SITUACAO"] == "A VENCER").sum()) if "SITUACAO" in df_cliente.columns else 0
-    _so_externo = sufixo_mercado(df_cliente) == " - Mercado Externo"
+    _so_externo = sufixo_mercado(df_cliente) == " - MERCADO EXTERNO"
     _sit_fat_val, _sit_fat_sub, _sit_fat_cor = situacao_faturamento(df_cliente)
 
     # Status ("Faturamento Bloqueado"): numa linha só quando o card tem largura; em duas linhas, na fonte normal, só quando

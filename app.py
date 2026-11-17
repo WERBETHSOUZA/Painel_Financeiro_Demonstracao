@@ -9,6 +9,7 @@ from config import frases
 from config.settings import aplicar_configuracoes
 from services.auth_service import authenticate_user, sanitize_username
 from services import permissoes
+from utils import atualizacao
 from services.data_service import (
     carregar_aps_erro,
     carregar_relatorio_approvo, carregar_contas_receber, carregar_total_faturado_cliente,
@@ -1016,6 +1017,7 @@ if st.session_state["_painel_ativo"] is not None and st.session_state["_painel_a
 
 # ── Roteamento ────────────────────────────────────────────────────────────────
 painel_atual = st.session_state["_painel_ativo"]
+atualizacao.ativar_nos_titulos(painel_atual)        # "Última atualização" discreta abaixo do título de cada painel
 # Resumo Pendências: a cada vez que a pessoa ENTRA no painel (vindo de outro), os cartões trocam de cliente com o outro efeito (fade, deslize, fade...)
 if painel_atual != st.session_state.get("_painel_render_anterior"):
     st.session_state["_painel_render_anterior"] = painel_atual

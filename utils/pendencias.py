@@ -247,13 +247,16 @@ def colunas_documentos(notas) -> list:
 
 
 def notas_pendentes_do_cliente(codigo):
-    """Notas do cliente que estão bloqueadas ou em validação manual (ver `_agrupar_notas`). None se o banco não respondeu."""
+    """Notas do cliente (ou de uma lista de clientes, como os de um grupo de crédito) que estão bloqueadas ou em validação manual
+    (ver `_agrupar_notas`). None se o banco não respondeu."""
     from services.data_service import carregar_notas_pendentes_validacao
 
     df = carregar_notas_pendentes_validacao()
     if df is None:
         return None
-    x = df[df["COD_CLIENTE"].astype(str) == str(int(float(codigo)))] if len(df) else df
+    codigos = [codigo] if isinstance(codigo, (str, int, float)) else list(codigo)
+    alvo = {str(int(float(c))) for c in codigos}
+    x = df[df["COD_CLIENTE"].astype(str).isin(alvo)] if len(df) else df
     return _agrupar_notas(x)
 
 
@@ -290,11 +293,12 @@ _CSS_NOTAS = ("<style>.pn-box{display:block;container-type:inline-size}"
               "@container (max-width: 300px){.pn-l{display:none}}@container (min-width: 301px){.pn-c{display:none}}</style>")
 
 
-def html_notas_pendentes(codigo):
+def html_notas_pendentes(codigo, nomes=None):
     """Painel com uma linha por nota do cliente e uma bolinha por documento que bloqueia (vermelho = vencido, azul = validando,
     âmbar = não anexado, verde = em ordem, tracejado = a regra não vale para a nota), com rolagem quando há muitas. Passe o mouse
     na bolinha para ver o documento; a NF abre o controle de venda no SyncProcess. None se não há nota pendente ou o banco não
-    respondeu (a tela então não mostra o painel)."""
+    respondeu (a tela então não mostra o painel). `codigo` pode ser uma lista (clientes de um grupo); com `nomes` ({código: nome}) cada
+    nota mostra o nome do cliente embaixo da NF."""
     notas = notas_pendentes_do_cliente(codigo)
     if notas is not None:
         notas = notas[notas["TIPO"] != "A_VENCER"].reset_index(drop=True)   # o card e este painel só contam bloqueante e validação manual
@@ -302,7 +306,8 @@ def html_notas_pendentes(codigo):
         return None
     cols = colunas_documentos(notas)
     n = len(cols)
-    grade = f"grid-template-columns:70px repeat({n},18px) minmax(0,1fr);gap:7px;align-items:center"
+    col_nf = "110px" if nomes else "70px"
+    grade = f"grid-template-columns:{col_nf} repeat({n},18px) minmax(0,1fr);gap:7px;align-items:center"
     cab = (f'<div style="display:grid;{grade};font-size:10px;color:#8892A4;padding-bottom:4px;border-bottom:1px solid #2a2a3a">'
            f'<span></span>' + "".join(f'<span title="{escape(nome, quote=True)}">{escape(sg)}</span>' for _, nome, sg in cols)
            + '<span style="text-align:right">Prazo</span></div>')
@@ -326,6 +331,10 @@ def html_notas_pendentes(codigo):
                   f'title="{escape(str(r.CONTROLE), quote=True)}">NF {escape(r.NF)}</a>')
         else:
             nf = f'<span style="color:#fff;font-weight:500">NF {escape(r.NF)}</span>'
+        if nomes:
+            nome_cli = str(nomes.get(str(int(float(r.COD_CLIENTE))), "")).strip()
+            nf = (f'<span style="display:block;min-width:0">{nf}<span style="display:block;color:#8892A4;font-size:10px;white-space:nowrap;overflow:hidden;'
+                  f'text-overflow:ellipsis" title="{escape(nome_cli, quote=True)}">{escape(nome_cli)}</span></span>')
         linhas += (f'<div style="display:grid;{grade};padding:3px 0;font-size:12px">{nf}{bolas}'
                    f'<span style="color:#aaaaaa;text-align:right;white-space:nowrap">{prazo}</span></div>')
     legenda = ("<span style='color:#ff6b6b'>●</span> inválido &nbsp;<span style='color:#6db3f5'>●</span> em validação &nbsp;"
