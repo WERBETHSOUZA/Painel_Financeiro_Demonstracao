@@ -1016,6 +1016,11 @@ if st.session_state["_painel_ativo"] is not None and st.session_state["_painel_a
 
 # ── Roteamento ────────────────────────────────────────────────────────────────
 painel_atual = st.session_state["_painel_ativo"]
+# Resumo Pendências: a cada vez que a pessoa ENTRA no painel (vindo de outro), os cartões trocam de cliente com o outro efeito (fade, deslize, fade...)
+if painel_atual != st.session_state.get("_painel_render_anterior"):
+    st.session_state["_painel_render_anterior"] = painel_atual
+    if painel_atual == "Resumo Pendências":
+        st.session_state["_rp_entradas"] = st.session_state.get("_rp_entradas", -1) + 1
 
 with st.container():
     if painel_atual is None:

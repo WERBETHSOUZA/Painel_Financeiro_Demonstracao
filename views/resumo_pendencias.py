@@ -86,11 +86,17 @@ def _ticker(chave: str, itens: list, cor: str) -> str:
     n = len(itens)
     fatia = 100 / n                       # parte do ciclo em que cada cliente fica na tela
     fade = fatia * 0.12                   # um nome some por completo antes de o próximo aparecer (sem os dois sobrepostos)
-    quadros = f"0%{{opacity:0}}{fade:.3f}%,{fatia - fade:.3f}%{{opacity:1}}{fatia:.3f}%,100%{{opacity:0}}"
-    atrasos = "".join(f".{chave}i{k}{{animation-delay:{k * _SEG}s}}" for k in range(n))
-    return (f"<style>@keyframes {chave}{{{quadros}}}.{chave}i{{opacity:0;animation:{chave} {_SEG * n}s linear infinite}}{atrasos}"
-            f".rp-card:hover .{chave}i{{animation-play-state:paused}}</style>"
-            f'<div class="rpk-janela rpk-fade">{"".join(linha(it, f" {chave}i {chave}i{k}") for k, it in enumerate(itens))}</div>')
+    ef = "S" if st.session_state.get("_rp_entradas", 0) % 2 else "F"   # todos os cartões iguais; troca de efeito a cada entrada no painel
+    ini = "opacity:0;transform:translateY(14px)" if ef == "S" else "opacity:0"
+    fim = "opacity:0;transform:translateY(-14px)" if ef == "S" else "opacity:0"
+    nome = f"{chave}{ef}"
+    quadros = (f"@keyframes {nome}{{0%{{{ini}}}{fade:.3f}%,{fatia - fade:.3f}%{{opacity:1;transform:none}}{fatia:.3f}%,100%{{{fim}}}}}"
+               f".{nome}{{animation:{nome} {_SEG * n}s linear infinite}}")
+    classes = [nome] * n
+    atrasos = "".join(f".{chave}d{k}{{animation-delay:{k * _SEG}s}}" for k in range(n))
+    return (f"<style>{quadros}{atrasos}.rp-card:hover .rpk-fade .rpk-item{{animation-play-state:paused}}.rpk-fade .rpk-item{{opacity:0}}</style>"
+            f'<div class="rpk-janela rpk-fade">'
+            + "".join(linha(it, f" {classes[k]} {chave}d{k}") for k, it in enumerate(itens)) + "</div>")
 
 
 def _card(titulo: str, rotulo: str, numero, unidade: str, cor: str, destaque: str, sub: str, rodape: str,
