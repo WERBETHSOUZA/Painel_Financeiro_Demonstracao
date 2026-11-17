@@ -1342,6 +1342,11 @@ def _aba_aberto(df: pd.DataFrame, ocultar: bool = False):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def _divisor() -> None:
+    """Linha fina entre os blocos da tela, com pouco espaço em volta (o st.divider() deixa uns 2 rem acima e abaixo)."""
+    st.markdown("<div style='height:1px;background:#2a2a3a;margin:.15rem 0 .35rem'></div>", unsafe_allow_html=True)
+
+
 def render(df: pd.DataFrame, mostrar_titulo: bool = True, df_grupo_agentes=None, df_grupo_geral=None) -> None:
     df_filtrado = classificar_vencidos(df)     # CLASSIF_VENCIDO: VENCIDO ou PDD nos vencidos
 
@@ -1371,9 +1376,9 @@ def render(df: pd.DataFrame, mostrar_titulo: bool = True, df_grupo_agentes=None,
             st.markdown("<div style='margin-top:1.05rem'></div>", unsafe_allow_html=True)
             st.button("🔄 Atualizar", key="cr_mi_atualizar", use_container_width=True, on_click=st.cache_data.clear)
 
-    st.divider()
+    _divisor()
     _cards_totais(df_filtrado, ocultar=st.session_state["cr_ocultar"])
-    st.divider()
+    _divisor()
 
     # Card "Descontos Pendentes" só para quem tem acesso ao relatório de pendentes: a faixa passa a ter 4 cards (Situação
     # em coluna estreita, rosca em cima); sem acesso, ficam os 3 de sempre.
@@ -1397,14 +1402,14 @@ def render(df: pd.DataFrame, mostrar_titulo: bool = True, df_grupo_agentes=None,
         with col_banco:
             _cards_banco(df_filtrado, ocultar=st.session_state["cr_ocultar"])
 
-    st.divider()
+    _divisor()
     col_tb, col_rank = st.columns([1, 1])
     with col_tb:
         _card_recebimentos_dia(df_filtrado, ocultar=st.session_state["cr_ocultar"])
     with col_rank:
         _ranking_clientes(df_filtrado, ocultar=st.session_state["cr_ocultar"], df_grupo_agentes=df_grupo_agentes, df_grupo_geral=df_grupo_geral)
 
-    st.divider()
+    _divisor()
 
     aba_resumo, aba_aberto = st.tabs(["Resumo", "Títulos em Aberto"])
 
