@@ -61,22 +61,45 @@ def botao_salvar_imagem(
     )
 
 
+def botao_salvar_pdf(
+    data: bytes,
+    file_name: str,
+    key: str | None = None,
+    use_container_width: bool = True,
+    label: str = "Salvar PDF",
+    help: str = "Salvar PDF (mesmo layout do PNG, para anexar em documentação)",
+) -> bool:
+    """Botão padrão "Salvar PDF", no mesmo padrão do "Salvar PNG"."""
+    return st.download_button(
+        label=label,
+        data=data,
+        file_name=file_name,
+        mime="application/pdf",
+        icon=":material/picture_as_pdf:",
+        key=key,
+        help=help,
+        use_container_width=use_container_width,
+    )
+
+
 def botoes_acao_row(
     excel: dict | None = None,
     imagem: dict | None = None,
     copiar: dict | None = None,
+    pdf: dict | None = None,
 ) -> None:
     """Linha padrão de botões Excel / Salvar PNG / Copiar.
 
     excel:  {"data": bytes, "file_name": str, "key": str, "label": str (opt)}
     imagem: {"data": bytes, "file_name": str, "key": str}
     copiar: {"data": bytes, "key": str}
+    pdf:    {"data": bytes, "file_name": str, "key": str}   (opcional; fica depois do PNG)
     Cada parâmetro é opcional — omita o que não existir.
     Aplica 12 px de espaçamento acima e gap pequeno entre os botões.
     """
     from utils.imagem_email import render_botao_copiar_imagem
 
-    n = sum(x is not None for x in (excel, imagem, copiar))
+    n = sum(x is not None for x in (excel, imagem, pdf, copiar))
     if n == 0:
         return
 
@@ -98,6 +121,10 @@ def botoes_acao_row(
                 imagem["data"], imagem["file_name"],
                 key=imagem["key"], use_container_width=True,
             )
+        idx += 1
+    if pdf is not None:
+        with cols[idx]:
+            botao_salvar_pdf(pdf["data"], pdf["file_name"], key=pdf["key"], use_container_width=True)
         idx += 1
     if copiar is not None:
         with cols[idx]:

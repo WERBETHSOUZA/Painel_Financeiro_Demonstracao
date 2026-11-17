@@ -1417,6 +1417,56 @@ def gerar_imagem_grupos_credito(
 
 # ── Texto copiável (para colar direto no corpo do e-mail) ─────────────────────
 
+def png_para_pdf(png: bytes, titulo: str = "") -> bytes:
+    """PDF A4 com a MESMA imagem do PNG do painel (mesmo layout), para anexar em documentação. A imagem ocupa a largura da página; se for mais
+    alta que a folha, continua nas páginas seguintes, cortando em uma linha livre (sem texto cortado ao meio). Folha em pé para imagem alta e
+    deitada para imagem larga. O fundo da folha usa a cor do fundo da imagem."""
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas as rl_canvas
+
+    img = Image.open(io.BytesIO(png)).convert("RGB")
+    larg, alt = img.size
+    pag_l, pag_a = (A4 if alt >= larg * 0.9 else landscape(A4))
+    margem = 22
+    util_l, util_a = pag_l - 2 * margem, pag_a - 2 * margem
+    escala = util_l / larg                       # pontos por pixel da imagem
+    alt_fatia = int(util_a / escala)             # pixels de imagem que cabem em uma folha
+    fundo = img.getpixel((0, 0))
+
+    def linha_livre(y: int) -> bool:             # linha toda da cor do fundo = ponto de corte seguro
+        faixa = img.crop((0, y, larg, y + 1)).getcolors(maxcolors=4)
+        return faixa is not None and len(faixa) == 1 and faixa[0][1] == fundo
+
+    cortes, y = [0], 0
+    while alt - y > alt_fatia:
+        alvo = y + alt_fatia
+        corte = alvo
+        for cand in range(alvo, max(y + alt_fatia // 2, y + 1), -1):   # procura para cima, até a metade da folha
+            if linha_livre(cand):
+                corte = cand
+                break
+        cortes.append(corte)
+        y = corte
+    cortes.append(alt)
+
+    saida = io.BytesIO()
+    pdf = rl_canvas.Canvas(saida, pagesize=(pag_l, pag_a))
+    if titulo:
+        pdf.setTitle(titulo)
+    for i in range(len(cortes) - 1):
+        topo, base = cortes[i], cortes[i + 1]
+        fatia = img.crop((0, topo, larg, base))
+        pdf.setPageSize((pag_l, pag_a))
+        pdf.setFillColorRGB(fundo[0] / 255, fundo[1] / 255, fundo[2] / 255)
+        pdf.rect(0, 0, pag_l, pag_a, stroke=0, fill=1)
+        h_pts = (base - topo) * escala
+        pdf.drawImage(ImageReader(fatia), margem, pag_a - margem - h_pts, width=util_l, height=h_pts)
+        pdf.showPage()
+    pdf.save()
+    return saida.getvalue()
+
+
 def gerar_texto_resumo_titulos(
     titulo_principal: str,
     cards_resumo: list,

@@ -21,7 +21,7 @@ from config import pagador
 from services.data_service import carregar_historico_pagamentos_me, carregar_historico_pagamentos_mi
 from utils.exporters import adicionar_perfil_e_titulos_pagos, exportar_excel, exportar_excel_faturamento_cliente_grupo
 from utils.prazos import calcular_dias_prazo, formatar_dias_html, formatar_dias_unificado_html, nullar_zeros_dias, texto_dias_para_imagem, VERDE_DIAS, VERMELHO_DIAS
-from utils.imagem_email import gerar_imagem_resumo_titulos
+from utils.imagem_email import gerar_imagem_resumo_titulos, png_para_pdf
 from utils.mercado import sufixo_mercado
 from views.contas_receber_painel import _COR_MI, _abrev, _bloco
 from views.faturamento_ano import (_MESES, dados_faturamento_ano, dados_faturamento_mes, dados_variacao_anual,
@@ -33,6 +33,7 @@ from views.situacao_cliente import _aging_para_imagem, _dados_aging, _formatar_r
 # Mesmo motivo do Grupo de Crédito/Situação Cliente: sem cache, a imagem (Pillow)
 # era refeita em todo rerun da página, mesmo sem o usuário pedir.
 _gerar_imagem_fcg_cached = st.cache_data(show_spinner=False, max_entries=50)(gerar_imagem_resumo_titulos)
+_pdf_fcg_cached = st.cache_data(show_spinner=False, max_entries=50)(png_para_pdf)
 
 
 def _formatar_moeda(valor) -> str:
@@ -976,6 +977,15 @@ def render(
         {"label": "% Inadimplência", "valor": f"{pct_inadimplencia:.2f}%".replace(".", ","), "cor": _rgb(cor_inadimplencia)},
         {"label": "Adiantamento em Aberto", "valor": valor_adto_card, "cor": (46, 204, 113)},
     ]
+    if _com_historico:                       # mesmo card "Perfil de pagamento" da tela (só o card, sem a faixa de faixas de pagamento)
+        _r_perfil = pagador.resumir(df_hist, pagador.MESES_CARD) if not df_hist.empty else {"perfil": "Sem histórico", "parcelas": 0}
+        _fundo_perfil = {"Ótimo pagador": (222, 236, 251), "Bom pagador": (224, 244, 231), "Regular": (250, 235, 210),
+                         "Atenção": (252, 228, 208), "Mau pagador": (250, 224, 222)}.get(_r_perfil["perfil"], (241, 243, 245))
+        cards_para_imagem.append({
+            "label": "Perfil de pagamento", "valor": _r_perfil["perfil"].title(),
+            "sub": (f"{_fmt_dias(_r_perfil['pct_prazo'])}% no prazo" if _r_perfil["parcelas"] >= pagador.MIN_PARCELAS else "poucas parcelas pagas"),
+            "cor": _rgb(pagador.COR_PERFIL[_r_perfil["perfil"]]), "fundo": _fundo_perfil,
+        })
     while len(cards_para_imagem) % _n:
         cards_para_imagem.append(None)
     cards_para_imagem += [
@@ -1103,6 +1113,8 @@ def render(
     botoes_acao_row(
         excel={"data": arquivo_excel, "file_name": f"Faturamento_{titulo_escolhido}.xlsx".replace(" ", "_").replace("/", "-"), "key": "fcg_export"},
         imagem={"data": imagem_png, "file_name": f"Faturamento_{titulo_escolhido}.png".replace(" ", "_").replace("/", "-"), "key": "fcg_export_imagem"},
+        pdf={"data": _pdf_fcg_cached(imagem_png, titulo_escolhido), "file_name": f"Faturamento_{titulo_escolhido}.pdf".replace(" ", "_").replace("/", "-"),
+             "key": "fcg_export_pdf"},
         copiar={"data": imagem_png, "key": "fcg_copiar"},
     )
 
