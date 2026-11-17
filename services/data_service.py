@@ -217,11 +217,10 @@ def carregar_pedidos_em_validacao():
     """Pedidos ainda sem nota com o pedido de compra do cliente ou o aceite do pedido pendente/inválido (COD_CLIENTE, CONTROLE, PEDIDO,
     DOC_CODIGO, DOCUMENTO, STATUS, DOC_STATUS, MOTIVO, GERADA), inventados."""
     hoje = pd.Timestamp(date.today())
-    itens = [(1102, "ACEITEPED", "Aceite do Pedido de Venda", 0, None, "Documento Aceite do Pedido de Venda foi considerado inválido para a regra.", 21),
-             (1104, "ACEITEPED", "Aceite do Pedido de Venda", 0, None, "Documento obrigatório Aceite do Pedido de Venda ainda não foi anexado ao checklist.", 16),
-             (1302, "PEDCOMPRA", "Pedido de Compra - Cliente", 0, None, "Documento obrigatório Pedido de Compra - Cliente ainda não foi anexado ao checklist.", 0),
-             (1101, "ACEITEPED", "Aceite do Pedido de Venda", 0, None, "Documento Aceite do Pedido de Venda foi considerado inválido para a regra.", 38),
-             (1103, "ACEITEPED", "Aceite do Pedido de Venda", 0, None, "Documento obrigatório Aceite do Pedido de Venda ainda não foi anexado ao checklist.", 9)]
+    ped = "Documento obrigatório Pedido de Compra - Cliente ainda não foi anexado ao checklist."
+    itens = [(1104, "PEDCOMPRA", "Pedido de Compra - Cliente", 0, None, ped, 16),
+             (1302, "PEDCOMPRA", "Pedido de Compra - Cliente", 0, None, ped, 0),
+             (1103, "PEDCOMPRA", "Pedido de Compra - Cliente", 0, None, ped, 9)]
     linhas = []
     for i, (cod, dc, nome, st_, ds, mot, dias) in enumerate(itens):
         linhas.append({"COD_CLIENTE": cod, "CONTROLE": f"CTV-2026-{4100 + i * 37:06d}", "PEDIDO": 21000 + i * 211, "DOC_CODIGO": dc, "DOCUMENTO": nome,

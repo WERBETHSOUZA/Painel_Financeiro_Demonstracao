@@ -153,6 +153,11 @@ def render(df_cr: pd.DataFrame) -> None:
     df_tela = df_tela.rename(columns=_COLUNAS)
     render_tabela_html(df_tela)
 
+    botao_exportar_excel(_gerar_excel(df_filtrado), "Boleto_Nao_Gerado.xlsx", key="rbn_export")
+
+
+def _gerar_excel(df_filtrado: pd.DataFrame) -> bytes:
+    colunas_existentes = [c for c in _COLUNAS if c in df_filtrado.columns]
     df_excel = df_filtrado[colunas_existentes].copy()
     for col in ("ENTRADA", "VENCIMENTO", "PRORROGADO"):
         if col in df_excel.columns:
@@ -168,9 +173,26 @@ def render(df_cr: pd.DataFrame) -> None:
             .replace({"None": "", "nan": ""})
         )
 
-    arquivo_excel = exportar_excel(
+    return exportar_excel(
         df_excel, "BOLETO_NAO_GERADO",
         colunas_situacao=("SITUACAO",), colunas_moeda=_COLUNAS_MOEDA,
         colunas_status={"STATUS": REGRAS_STATUS_BOLETO},
     )
-    botao_exportar_excel(arquivo_excel, "Boleto_Nao_Gerado.xlsx", key="rbn_export")
+
+
+def excel_liberados(df_cr: pd.DataFrame) -> bytes | None:
+    """Excel do relatório com o filtro padrão (status LIBERADO), para o atalho do card do Resumo Pendências. None se não há o que exportar."""
+    obrig = {"MERCADO", "SITUACAO_BOLETO", "SITUACAO", "TIPO_REGRA", "DESC_APLIC_NF", "DESC_APLIC_FIN"}
+    if df_cr is None or df_cr.empty or not obrig.issubset(df_cr.columns):
+        return None
+    df = df_cr[(df_cr["MERCADO"] == "MI") & (df_cr["SITUACAO_BOLETO"] != "BOLETO GERADO") & (df_cr["SITUACAO"].isin(["A VENCER", "VENCIDO"]))].copy()
+    if "TIPO_PESSOA" in df.columns:
+        df = df[df["TIPO_PESSOA"] != "F"]
+    transf = clientes_transferencia.carregar()
+    if transf and "COD_CLIENTE" in df.columns:
+        df = df[~df["COD_CLIENTE"].astype(str).isin(transf)]
+    if df.empty:
+        return None
+    df["STATUS"] = df.apply(_status_boleto, axis=1)
+    df = df[df["STATUS"] == "LIBERADO"]
+    return None if df.empty else _gerar_excel(df)

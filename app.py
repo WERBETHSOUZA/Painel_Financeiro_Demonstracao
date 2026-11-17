@@ -447,7 +447,7 @@ def _slug_menu(txt: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", unicodedata.normalize("NFKD", txt).encode("ascii", "ignore").decode().lower()).strip("_")
 
 
-def _css_icones_menu() -> str:
+def _css_icones_menu(_selo_pendencias: int = 0) -> str:
     """CSS que desenha o ícone de cada botão do menu (imagem antes do texto; no menu recolhido, só a imagem).
     Os botões do grupo são identificados pelo prefixo da chave (a chave do grupo muda a cada painel aberto)."""
     regras = []
@@ -472,7 +472,16 @@ def _css_icones_menu() -> str:
              'background-repeat:no-repeat;background-position:center;background-size:contain}'
              'section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias, '
              '[class*="st-key-pop_"]) button p::before{width:24px;height:24px;margin-right:0;vertical-align:middle}')
-    return "<style>" + comum + "".join(regras) + "</style>"
+    selo = ""
+    if _selo_pendencias:
+        txt = "99+" if _selo_pendencias > 99 else str(_selo_pendencias)
+        selo = ('.st-key-nav_resumo_pendencias button{position:relative}'
+                '.st-key-nav_resumo_pendencias button::after{content:"' + txt + '";position:absolute;right:10px;top:50%;transform:translateY(-50%);'
+                'min-width:22px;height:20px;padding:0 6px;box-sizing:border-box;border-radius:10px;background:#E24B4A;color:#fff;'
+                'font-size:12px;font-weight:500;line-height:20px;text-align:center}'
+                'section[data-testid="stSidebar"][data-ibc-rail="1"] .st-key-nav_resumo_pendencias button::after{right:2px;top:-6px;transform:none;'
+                'border:2px solid #141a2e;height:20px;line-height:16px}')
+    return "<style>" + comum + "".join(regras) + selo + "</style>"
 
 PAINEIS_ADMIN = [
     ("📑", "Relatórios", PAGINAS_RELATORIOS),
@@ -857,7 +866,8 @@ with st.sidebar:
         st.rerun()
 
     painel_ativo_menu = st.session_state["_painel_ativo"] or ""
-    st.markdown(_css_icones_menu(), unsafe_allow_html=True)
+    _selo_pendencias = resumo_pendencias.contar_validacao_manual() if permissoes.tem_resumo_pendencias(usuario, _dados_perm) else 0
+    st.markdown(_css_icones_menu(_selo_pendencias), unsafe_allow_html=True)
 
     for item in paineis:
         if len(item) == 3:

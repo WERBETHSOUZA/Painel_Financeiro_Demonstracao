@@ -134,6 +134,7 @@ def _nomes_cheios(nomes: list) -> list:
 def _card_descontos(df_cr: pd.DataFrame) -> str:
     titulo = "Descontos Contratuais Pendentes"
     desc = resumo_descontos_pendentes(df_cr)
+    st.session_state["_rp_xls_desc"] = bool(desc and desc["pendentes"])      # o atalho de Excel do card só aparece quando há o que baixar
     if desc is None:
         return _indisponivel(titulo)
     pend, erros = desc["pendentes"], desc["erros"]
@@ -148,6 +149,7 @@ def _card_descontos(df_cr: pd.DataFrame) -> str:
 
 def _card_boletos(df_cr: pd.DataFrame) -> str:
     titulo = "Boletos Não Gerados"
+    st.session_state["_rp_xls_bol"] = False
     obrig = {"MERCADO", "SITUACAO_BOLETO", "SITUACAO", "TIPO_REGRA", "DESC_APLIC_NF", "DESC_APLIC_FIN", "COD_CLIENTE", "CLIENTE"}
     if df_cr is None or df_cr.empty or not obrig.issubset(df_cr.columns):
         return _indisponivel(titulo)
@@ -168,6 +170,7 @@ def _card_boletos(df_cr: pd.DataFrame) -> str:
     if livres.empty:
         return _card(titulo, "Sem boleto", 0, "título(s)", _AZUL, "Nenhum liberado", "&nbsp;",
                      f"{bloq} bloqueado(s) por desconto pendente")
+    st.session_state["_rp_xls_bol"] = True
     top = livres.groupby("CLIENTE").size().sort_values(ascending=False).head(10)
     itens = [(c, f"{int(q):02d} {_plural(int(q), 'título', 'títulos')}", None) for c, q in zip(_nomes_cheios([str(i) for i in top.index]), top.values)]
     rodape = (f'{livres["COD_CLIENTE"].nunique()} cliente(s) · {vencidos} vencido(s)'
@@ -582,6 +585,76 @@ def _momento_dados() -> datetime.datetime:
     return datetime.datetime.now()
 
 
+_REL_DESCONTOS = "Relatórios > 📄 Descontos Contratuais Pendentes MI"
+_REL_BOLETOS = "Relatórios > 📄 Boleto Não Gerado"
+_CSS_ATALHOS = """<style>
+.st-key-rp_cards [data-testid="stHorizontalBlock"]{flex-wrap:wrap;gap:12px;row-gap:0}
+.st-key-rp_cards [data-testid="stColumn"]{flex:1 1 230px !important;min-width:230px !important;width:auto !important;margin-bottom:12px}
+.st-key-rp_cards [data-testid="stColumn"]:has([class*="st-key-rp_at_"]) .rp-mt{padding-right:70px;min-height:1.5rem}
+.st-key-rp_cards [data-testid="stColumn"]:has([class*="st-key-rp_at_"]){position:relative}
+.st-key-rp_cards [class*="st-key-rp_at_"]{position:absolute;bottom:14px;right:10px;width:auto !important;z-index:5}
+.st-key-rp_cards [class*="st-key-rp_at_"] [data-testid="stHorizontalBlock"]{flex-wrap:nowrap;gap:2px;row-gap:2px}
+.st-key-rp_cards [class*="st-key-rp_at_"] [data-testid="stColumn"]{flex:0 0 auto !important;min-width:0 !important}
+.st-key-rp_cards [class*="st-key-rp_at_"] button{min-height:1.7rem;height:1.7rem;width:1.9rem;padding:0;border:none;background:transparent;color:#8ec2f5}
+.st-key-rp_cards [class*="st-key-rp_at_"] button:hover{background:rgba(142,194,245,.14);color:#fff}
+.st-key-rp_cards [class*="st-key-rp_at_"] button p{display:none}
+</style>"""
+
+
+def _abrir_relatorio(painel: str, estado: dict) -> None:
+    """Callback do atalho do card: abre o relatório já gerado, com o filtro do card (roda antes da próxima execução do app, por isso o menu já marca o painel)."""
+    st.session_state.update(estado)
+    st.session_state["_painel_ativo"] = painel
+    st.session_state.pop("_rel_gerou", None)
+
+
+def _atalhos_card(chave: str, painel: str, estado: dict, gerar_excel, arquivo: str, tem_excel: bool) -> None:
+    """Dois ícones discretos no canto inferior direito do card: abrir o relatório e baixar o Excel dele (gerado só ao clicar)."""
+    visiveis = st.session_state.get("_relatorios_visiveis")
+    pode_abrir = visiveis is None or painel.removeprefix("Relatórios > ") in visiveis
+    if not pode_abrir:
+        return
+    with st.container(key=f"rp_at_{chave}"):
+        c1, c2 = st.columns(2 if tem_excel else 1, gap="small")
+        with c1:
+            st.button("Abrir", icon=":material/open_in_new:", key=f"rp_abrir_{chave}", help="Abrir o relatório já gerado",
+                      on_click=_abrir_relatorio, args=(painel, estado))
+        if tem_excel:
+            with c2:
+                botao_exportar_excel(gerar_excel, arquivo, key=f"rp_xls_{chave}", label="Excel", help="Baixar o Excel do relatório")
+
+
+def _desenhar_cards(cards: list, df_cr: pd.DataFrame) -> None:
+    """Os quatro cartões lado a lado (quebram em linhas como a grade antiga); Descontos e Boletos ganham os atalhos de abrir/baixar o relatório."""
+    from views import relatorio_boleto_nao_gerado, relatorio_desconto_financeiro_pendente
+    st.html(_CSS + _CSS_ATALHOS)
+    with st.container(key="rp_cards"):
+        cols = st.columns(4, gap="small")
+        for c, html in zip(cols, cards):
+            with c:
+                st.html(html)
+        with cols[0]:
+            _atalhos_card("desc", _REL_DESCONTOS, {"_rdf_gerou": True, "rdf_status": ["PENDENTE"]},
+                          lambda: relatorio_desconto_financeiro_pendente.excel_pendentes(df_cr) or b"",
+                          f"Descontos_Contratuais_Pendentes_MI_{datetime.date.today():%Y%m%d}.xlsx", st.session_state.get("_rp_xls_desc", False))
+        with cols[1]:
+            _atalhos_card("bol", _REL_BOLETOS, {"_rbn_gerou": True, "rbn_status": ["LIBERADO"]},
+                          lambda: relatorio_boleto_nao_gerado.excel_liberados(df_cr) or b"",
+                          f"Boleto_Nao_Gerado_{datetime.date.today():%Y%m%d}.xlsx", st.session_state.get("_rp_xls_bol", False))
+
+
+def contar_validacao_manual() -> int:
+    """Quantidade de pendências em validação manual de documentação (a mesma da aba Validação manual: notas + pedidos sem nota).
+    Usada no selo do ícone do menu; bloqueantes e a vencer não entram. Usa as consultas já em cache; 0 se o banco não respondeu."""
+    try:
+        notas = notas_pendentes_todas()
+        n = 0 if notas is None else int((notas["TIPO"] == "MANUAL").sum())
+        pedidos = _pedidos_em_validacao()
+        return n + (0 if pedidos is None else len(pedidos))
+    except Exception:
+        return 0
+
+
 def render(df_cr: pd.DataFrame) -> None:
     momento = _momento_dados()
     # o botão Ocultar usa o mesmo estado do Contas a Receber (cr_ocultar): esconder valores vale para o app todo
@@ -616,7 +689,7 @@ def render(df_cr: pd.DataFrame) -> None:
             if pedidos is not None and not pedidos.empty:
                 notas = pd.concat([notas, pedidos], ignore_index=True)
         cards = [_card_descontos(df_cr), _card_boletos(df_cr), _card_notas(notas), _card_esperado_recebido(df_cr, ocultar)]
-    st.html(_CSS + '<div class="rp-grade">' + "".join(cards) + "</div>")
+    _desenhar_cards(cards, df_cr)
 
     if notas is None:
         st.info("Não foi possível consultar as notas pendentes de validação agora.")

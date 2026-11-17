@@ -235,6 +235,70 @@ def _ajustar_para_tela(xlsx: bytes, colunas_multilinha: list = ()) -> bytes:
     return saida.getvalue()
 
 
+def _base_regra(df_cr: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+    """Títulos MI com regra de desconto financeiro, já com a conta do desconto, as classes e o status; devolve também o aviso de quando fica vazio."""
+    df_filtrado = df_cr[
+        (df_cr["MERCADO"] == "MI")
+        & (df_cr["TIPO_REGRA"] == "FINANCEIRO")
+    ].copy()
+
+    if df_filtrado.empty:
+        return df_filtrado, "Nenhum título com regra de desconto financeiro no Mercado Interno."
+
+    # A fórmula (Líquido x % da regra) vale pra qualquer título, esteja o desconto
+    # já aplicado ou não — ela só calcula o que a regra determina. O que diferencia
+    # é a coluna Status: PENDENTE (DESC_APLIC_FIN vazio) ou APLICADO (já preenchido).
+    df_filtrado["DESCONTO_A_APLICAR"] = df_filtrado["LIQUIDO_FIN"] * df_filtrado["PERC_REGRA"].apply(_parse_percentual)
+    df_filtrado["VALOR_ATUALIZADO"] = df_filtrado["LIQUIDO_FIN"] - df_filtrado["DESCONTO_A_APLICAR"]
+
+    df_filtrado = _montar_classes(df_filtrado)
+
+    # Contabilidade fecha o período: erro de um mês já encerrado não dá mais para validar nem
+    # corrigir, então sai do relatório. Vale a data de ENTRADA da NF contra o mês atual.
+    inicio_mes = pd.Timestamp.today().normalize().replace(day=1)
+    fechado = pd.to_datetime(df_filtrado["ENTRADA"], errors="coerce") < inicio_mes
+    # (exceção: "sem classe definida" nunca some, é cadastro faltando e não erro contábil do mês)
+    df_filtrado = df_filtrado[~(df_filtrado["STATUS"].isin(_STATUS_ERRO) & (df_filtrado["STATUS"] != _STATUS_SEM_CLASSE) & fechado)]
+    return df_filtrado, "Nenhum título com regra de desconto financeiro no período em aberto."
+
+
+def _filtrar_status(df: pd.DataFrame, status_sel) -> pd.DataFrame:
+    if not status_sel:
+        return df
+    # PENDENTE inclui os erros: tudo que não é APLICADO ainda precisa de ação.
+    return df[df["STATUS"].eq("APLICADO").map({True: "APLICADO", False: "PENDENTE"}).isin(status_sel)]
+
+
+def _gerar_excel(df_filtrado: pd.DataFrame) -> bytes:
+    colunas_existentes = [c for c in _COLUNAS if c in df_filtrado.columns]
+    df_excel = df_filtrado[colunas_existentes].copy()
+    for col in ("ENTRADA", "VENCIMENTO", "PRORROGADO"):
+        if col in df_excel.columns:
+            df_excel[col] = pd.to_datetime(df_excel[col], errors="coerce")
+    for col in ("VALOR_FATURADO", "LIQUIDO_FIN", "DESCONTO_A_APLICAR", "VALOR_ATUALIZADO"):
+        if col in df_excel.columns:
+            df_excel[col] = pd.to_numeric(df_excel[col], errors="coerce")
+    df_excel["COD_CLIENTE"] = pd.to_numeric(df_excel["COD_CLIENTE"], errors="coerce").astype("Int64")
+    df_excel = df_excel.rename(columns=_COLUNAS)
+    # % Regra fica como a consulta já devolve (texto "12.30%"),
+    # sem virar percentual nativo — mesmo motivo do Contas a Receber: evita que
+    # a formatação de % do Excel multiplique o valor por 100 se reaplicada.
+    for col in set(_COLUNAS_PERCENTUAL_TEXTO) & set(df_excel.columns):
+        df_excel[col] = (
+            df_excel[col].astype(str).str.strip()
+            .str.replace("-", "", regex=False)
+            .replace({"None": "", "nan": ""})
+        )
+
+    arquivo_excel = exportar_excel(
+        df_excel, "DESCONTO_FINANCEIRO_PENDENTE",
+        colunas_situacao=("SITUACAO",), colunas_moeda=_COLUNAS_MOEDA,
+        colunas_destacadas=("DESCONTO TOTAL",),
+        colunas_status={"STATUS": _REGRAS_STATUS},
+    )
+    return _ajustar_para_tela(arquivo_excel)
+
+
 def render(df_cr: pd.DataFrame) -> None:
     _col_t, _col_at = st.columns([8, 1])
     with _col_t:
@@ -270,40 +334,15 @@ def render(df_cr: pd.DataFrame) -> None:
         st.warning("Dados incompletos para montar este relatório.")
         return
 
-    df_filtrado = df_cr[
-        (df_cr["MERCADO"] == "MI")
-        & (df_cr["TIPO_REGRA"] == "FINANCEIRO")
-    ].copy()
-
+    df_filtrado, msg = _base_regra(df_cr)
     if df_filtrado.empty:
-        st.success("Nenhum título com regra de desconto financeiro no Mercado Interno.")
+        st.success(msg)
         return
 
-    # A fórmula (Líquido x % da regra) vale pra qualquer título, esteja o desconto
-    # já aplicado ou não — ela só calcula o que a regra determina. O que diferencia
-    # é a coluna Status: PENDENTE (DESC_APLIC_FIN vazio) ou APLICADO (já preenchido).
-    df_filtrado["DESCONTO_A_APLICAR"] = df_filtrado["LIQUIDO_FIN"] * df_filtrado["PERC_REGRA"].apply(_parse_percentual)
-    df_filtrado["VALOR_ATUALIZADO"] = df_filtrado["LIQUIDO_FIN"] - df_filtrado["DESCONTO_A_APLICAR"]
-
-    df_filtrado = _montar_classes(df_filtrado)
-
-    # Contabilidade fecha o período: erro de um mês já encerrado não dá mais para validar nem
-    # corrigir, então sai do relatório. Vale a data de ENTRADA da NF contra o mês atual.
-    inicio_mes = pd.Timestamp.today().normalize().replace(day=1)
-    fechado = pd.to_datetime(df_filtrado["ENTRADA"], errors="coerce") < inicio_mes
-    # (exceção: "sem classe definida" nunca some, é cadastro faltando e não erro contábil do mês)
-    df_filtrado = df_filtrado[~(df_filtrado["STATUS"].isin(_STATUS_ERRO) & (df_filtrado["STATUS"] != _STATUS_SEM_CLASSE) & fechado)]
+    df_filtrado = _filtrar_status(df_filtrado, status_sel)
     if df_filtrado.empty:
-        st.success("Nenhum título com regra de desconto financeiro no período em aberto.")
+        st.info("Nenhum título encontrado para o status selecionado.")
         return
-
-    if status_sel:
-        # PENDENTE inclui os erros: tudo que não é APLICADO ainda precisa de ação.
-        df_filtrado = df_filtrado[df_filtrado["STATUS"].eq("APLICADO").map(
-            {True: "APLICADO", False: "PENDENTE"}).isin(status_sel)]
-        if df_filtrado.empty:
-            st.info("Nenhum título encontrado para o status selecionado.")
-            return
 
     qtd_pendente = int((df_filtrado["STATUS"] == "PENDENTE").sum())
     qtd_aplicado = int((df_filtrado["STATUS"] == "APLICADO").sum())
@@ -336,30 +375,13 @@ def render(df_cr: pd.DataFrame) -> None:
     df_tela = df_tela.rename(columns=_COLUNAS)
     render_tabela_html(df_tela)
 
-    df_excel = df_filtrado[colunas_existentes].copy()
-    for col in ("ENTRADA", "VENCIMENTO", "PRORROGADO"):
-        if col in df_excel.columns:
-            df_excel[col] = pd.to_datetime(df_excel[col], errors="coerce")
-    for col in ("VALOR_FATURADO", "LIQUIDO_FIN", "DESCONTO_A_APLICAR", "VALOR_ATUALIZADO"):
-        if col in df_excel.columns:
-            df_excel[col] = pd.to_numeric(df_excel[col], errors="coerce")
-    df_excel["COD_CLIENTE"] = pd.to_numeric(df_excel["COD_CLIENTE"], errors="coerce").astype("Int64")
-    df_excel = df_excel.rename(columns=_COLUNAS)
-    # % Regra fica como a consulta já devolve (texto "12.30%"),
-    # sem virar percentual nativo — mesmo motivo do Contas a Receber: evita que
-    # a formatação de % do Excel multiplique o valor por 100 se reaplicada.
-    for col in set(_COLUNAS_PERCENTUAL_TEXTO) & set(df_excel.columns):
-        df_excel[col] = (
-            df_excel[col].astype(str).str.strip()
-            .str.replace("-", "", regex=False)
-            .replace({"None": "", "nan": ""})
-        )
+    botao_exportar_excel(_gerar_excel(df_filtrado), "Descontos_Contratuais_Pendentes_MI.xlsx", key="rdf_export")
 
-    arquivo_excel = exportar_excel(
-        df_excel, "DESCONTO_FINANCEIRO_PENDENTE",
-        colunas_situacao=("SITUACAO",), colunas_moeda=_COLUNAS_MOEDA,
-        colunas_destacadas=("DESCONTO TOTAL",),
-        colunas_status={"STATUS": _REGRAS_STATUS},
-    )
-    arquivo_excel = _ajustar_para_tela(arquivo_excel)
-    botao_exportar_excel(arquivo_excel, "Descontos_Contratuais_Pendentes_MI.xlsx", key="rdf_export")
+
+def excel_pendentes(df_cr: pd.DataFrame) -> bytes | None:
+    """Excel do relatório com o filtro padrão (status PENDENTE), para o atalho do card do Resumo Pendências. None se não há o que exportar."""
+    if df_cr is None or df_cr.empty or not {"MERCADO", "TIPO_REGRA", "DESC_APLIC_FIN"}.issubset(df_cr.columns):
+        return None
+    df, _ = _base_regra(df_cr)
+    df = _filtrar_status(df, ["PENDENTE"])
+    return None if df.empty else _gerar_excel(df)
