@@ -92,6 +92,15 @@ hr {
     margin: 12px 0;
 }
 
+/* Espaçamento compacto em todos os painéis: separadores (st.divider) e títulos de página com pouca folga em volta.
+   O Streamlit deixa uns 2 rem acima e abaixo de cada separador e 1,25 rem acima do título; aqui ficam ~0,3 rem. */
+[data-testid="stMainBlockContainer"] hr {
+    margin: .2rem 0 .3rem !important;
+}
+[data-testid="stMainBlockContainer"] h1 {
+    padding: .3rem 0 .4rem !important;
+}
+
 /* ── Animações de entrada dos gráficos iniciais (só CSS, sem JavaScript) ────────── */
 @keyframes an-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 .an-wipe { animation: an-wipe .9s cubic-bezier(.2, .8, .2, 1) both; }

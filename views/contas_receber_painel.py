@@ -576,8 +576,6 @@ def render(df_cr: pd.DataFrame, df_grupo_agentes=None, df_grupo_geral=None, seca
         st.session_state["cr_ocultar"] = False
 
     _ocultar_atual = st.session_state["cr_ocultar"]
-    st.markdown("<style>div[data-testid='stMainBlockContainer'] h1{padding:.2rem 0 .3rem !important}"
-                "div[data-testid='stMainBlockContainer']{padding-top:3rem !important}</style>", unsafe_allow_html=True)   # título e topo da tela mais compactos
     col_t, col_btn, col_atualizar = st.columns([9, 1.4, 1.4])
     with col_t:
         st.title(f"Contas a Receber · {TITULOS_SECAO[secao]}")
