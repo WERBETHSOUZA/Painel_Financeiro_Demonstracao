@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 from components.buttons import botao_exportar_excel, botoes_acao_row
 from components.cards import card_html, render_cards_row, render_tabela_html, situacao_faturamento
+from utils.formatters import formatar_cnpj_cpf
 from utils.pendencias import card_pendencias, fundo_por_cor, html_notas_pendentes
 from utils.exporters import exportar_excel
 from utils.mercado import sufixo_mercado
@@ -425,11 +426,15 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
         for col in colunas_valor:
             if col in df_clientes.columns:
                 df_clientes[col] = df_clientes[col].apply(_formatar_numero)
+        if "CNPJ" in df_clientes.columns:                                # 00.000.000/0000-00 (CPF: 000.000.000-00), na tela, no Excel e na imagem
+            df_clientes["CNPJ"] = df_clientes["CNPJ"].apply(formatar_cnpj_cpf)
+            df_clientes_num["CNPJ"] = df_clientes["CNPJ"]
 
         colunas_exibir = {
             "COD_AGENTE":       "Cód. Agente",
             "UF":               "ESTADO",
             "NOME_AGENTE":      "Cliente",
+            "CNPJ":             "CNPJ",
             "CONSUMIDO_EM_PV":  "PV",
             "CONSUMIDO_EM_NF":  "NF",
             "TOTAL_CONSUMIDO":  "Total",
@@ -484,7 +489,7 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
                 df_titulos=df_exib,
                 titulo_tabela=f"Clientes do grupo {grupo_sel}",
                 destacar_vencidos=False,
-                ordem_colunas=["Cliente", "Cód. Agente", "ESTADO", "PV", "NF", "Total"],
+                ordem_colunas=["Cliente", "CNPJ", "Cód. Agente", "ESTADO", "PV", "NF", "Total"],
                 paineis=_paineis_para_imagem(limite_total, limite_disponivel, consumido_nf, consumido_pv,
                                              df_clientes_num, pct_utilizado),
                 nota_rodape=_texto_representatividade(df_contas_receber, codigos_grupo),

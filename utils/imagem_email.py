@@ -415,7 +415,7 @@ def gerar_imagem_resumo_titulos(
         "Cód. Cliente", "Cliente", "NF", "Complemento", "Valor Total", "Saldo Total",
         "Saldo em Aberto", "Entrada", "Vencimento", "Prazo", "Dias", "Dias p/ Vencer", "Atraso", "Situação", "Classificação", "Banco",
         "Moeda", "Cotação", "Saldo (Moeda)",
-        "Cód. Agente", "ESTADO", "Consumido em PV", "Consumido em NF", "Total Consumido", "PV", "Total", "Faturado",
+        "Cód. Agente", "CNPJ", "ESTADO", "Consumido em PV", "Consumido em NF", "Total Consumido", "PV", "Total", "Faturado",
         "Agente Financeiro", "Grupo Financeiro", "Tipo Conta Financeira", "Extenso", "Reduzido",
         "Saldo Anterior", "Débito", "Crédito", "IOF", "IRRF", "Rendimentos", "Aplicação",
         "Resgate", "Saldo Atual",

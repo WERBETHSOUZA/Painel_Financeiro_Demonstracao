@@ -8,6 +8,7 @@ from components.cards import card_html, render_cards_row, render_tabela_html, si
 from utils.pendencias import card_pendencias, fundo_por_cor, html_notas_pendentes
 from services.data_service import carregar_regra_desconto_cliente
 from utils.exporters import exportar_excel
+from utils.formatters import formatar_cnpj_cpf
 from utils.mercado import sufixo_mercado
 from utils.prazos import calcular_dias_prazo, formatar_dias_html, formatar_dias_unificado_html, texto_dias_para_imagem, VERDE_DIAS, VERMELHO_DIAS
 from datetime import date
@@ -328,7 +329,15 @@ def render(
             m for m in df_cliente["MOEDA"].dropna().unique() if m != "R$"
         )
 
+    st.html("<style>div[data-testid='stMainBlockContainer'] h3{padding:.3rem 0 .2rem !important}</style>")      # subtítulos mais colados ao que vem abaixo
     st.subheader(f"{codigo_agente} - {cliente_sel}{sufixo_mercado(df_cliente)}")     # código - cliente - mercado
+    # CNPJ/CPF do cliente (vem do cadastro do Grupo de Crédito), em linha pequena abaixo do título
+    if df_grupo_agentes is not None and not df_grupo_agentes.empty and {"COD_AGENTE", "CNPJ"}.issubset(df_grupo_agentes.columns):
+        _doc = df_grupo_agentes.loc[df_grupo_agentes["COD_AGENTE"].astype(str) == str(codigo_agente), "CNPJ"].dropna()
+        _doc = formatar_cnpj_cpf(_doc.iloc[0]) if not _doc.empty else ""
+        if _doc:
+            _rotulo_doc = "CPF" if len("".join(c for c in _doc if c.isdigit())) == 11 else "CNPJ"
+            st.html(f"<div style='font-size:16px;color:#8892a4;margin:-.5rem 0 -.4rem 2px'>{_rotulo_doc} {_doc}</div>")
 
     # ── Cards de resumo ─────────────────────────────────────────────────────
     # Títulos em reais do cliente (notas de complemento): não têm valor na moeda estrangeira.
