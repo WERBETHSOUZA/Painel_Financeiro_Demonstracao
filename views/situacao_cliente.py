@@ -1,6 +1,7 @@
 import re
 
 import streamlit as st
+from html import escape
 import pandas as pd
 from functools import partial
 from components.buttons import botao_exportar_excel, botoes_acao_row
@@ -331,13 +332,27 @@ def render(
 
     st.html("<style>div[data-testid='stMainBlockContainer'] h3{padding:.3rem 0 .2rem !important}</style>")      # subtítulos mais colados ao que vem abaixo
     st.subheader(f"{codigo_agente} - {cliente_sel}{sufixo_mercado(df_cliente)}")     # código - cliente - mercado
-    # CNPJ/CPF do cliente (vem do cadastro do Grupo de Crédito), em linha pequena abaixo do título
-    if df_grupo_agentes is not None and not df_grupo_agentes.empty and {"COD_AGENTE", "CNPJ"}.issubset(df_grupo_agentes.columns):
-        _doc = df_grupo_agentes.loc[df_grupo_agentes["COD_AGENTE"].astype(str) == str(codigo_agente), "CNPJ"].dropna()
-        _doc = formatar_cnpj_cpf(_doc.iloc[0]) if not _doc.empty else ""
-        if _doc:
-            _rotulo_doc = "CPF" if len("".join(c for c in _doc if c.isdigit())) == 11 else "CNPJ"
-            st.html(f"<div style='font-size:16px;color:#8892a4;margin:-.5rem 0 -.4rem 2px'>{_rotulo_doc} {_doc}</div>")
+    # Abaixo do título, numa linha pequena: "CNPJ ... - Grupo de crédito: NOME" (ambos vêm do cadastro do Grupo de Crédito)
+    _linhas_id = []
+    _grupo_txt = "Sem grupo de crédito"
+    if df_grupo_agentes is not None and not df_grupo_agentes.empty and "COD_AGENTE" in df_grupo_agentes.columns:
+        _ag = df_grupo_agentes[df_grupo_agentes["COD_AGENTE"].astype(str) == str(codigo_agente)]
+        if not _ag.empty and "CNPJ" in _ag.columns:
+            _doc = _ag["CNPJ"].dropna()
+            _doc = formatar_cnpj_cpf(_doc.iloc[0]) if not _doc.empty else ""
+            if _doc:
+                _rotulo_doc = "CPF" if len("".join(c for c in _doc if c.isdigit())) == 11 else "CNPJ"
+                _linhas_id.append(f"{_rotulo_doc} {_doc}")
+        if not _ag.empty and "COD_GRUPO" in _ag.columns and pd.notna(_ag.iloc[0]["COD_GRUPO"]):
+            _cod_grp = _ag.iloc[0]["COD_GRUPO"]
+            _nome_grp = ""
+            if df_grupo_geral is not None and not df_grupo_geral.empty and {"GRUPO_CODIGO", "NOME_GRUPO"}.issubset(df_grupo_geral.columns):
+                _m = df_grupo_geral.loc[df_grupo_geral["GRUPO_CODIGO"] == _cod_grp, "NOME_GRUPO"].dropna()
+                _nome_grp = str(_m.iloc[0]).strip() if not _m.empty else ""
+            if _nome_grp:
+                _grupo_txt = f"Grupo de crédito: {escape(_nome_grp)}"
+    _linhas_id.append(_grupo_txt)
+    st.html("<div style='font-size:16px;color:#8892a4;margin:-.5rem 0 -.4rem 2px;line-height:1.45'>" + " - ".join(_linhas_id) + "</div>")
 
     # ── Cards de resumo ─────────────────────────────────────────────────────
     # Títulos em reais do cliente (notas de complemento): não têm valor na moeda estrangeira.
