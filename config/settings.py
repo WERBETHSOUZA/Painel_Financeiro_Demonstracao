@@ -4,9 +4,9 @@ from pathlib import Path
 
 def aplicar_configuracoes():
     st.set_page_config(
-        page_title="Painel Financeiro | Demo",
+        page_title="BI Financeiro - Demo",
         layout="wide",
-        page_icon="💰",
+        page_icon=str(Path(__file__).parent.parent / "assets" / "demo_icone.png"),   # esfera da logo, legível no tamanho da aba
         initial_sidebar_state="expanded"
     )
     css_path = Path(__file__).parent.parent / "assets" / "styles.css"
