@@ -27,7 +27,7 @@ from services.data_service import (carregar_controles_abertos_mi, carregar_grupo
                                    carregar_lista_clientes, carregar_notas_pendentes_validacao, carregar_recebido_periodo_mi,
                                    carregar_pedidos_em_validacao, carregar_recebimento_hoje_mi)
 from utils.pendencias import _GRAVIDADE, ESTADO_ROTULO, _ha_dias, _quando, colunas_documentos, dica_documento, notas_pendentes_todas, url_busca_controles, url_controle_venda
-from views.contas_receber import _nomes_curtos, formatar_moeda
+from views.contas_receber import formatar_moeda
 from views.relatorio_boleto_nao_gerado import _status_boleto
 from views.relatorio_desconto_financeiro_pendente import resumo_descontos_pendentes
 
@@ -37,16 +37,16 @@ _AMARELO, _AZUL, _VERMELHO, _VERDE, _CINZA = "#F59E0B", "#378ADD", "#E24B4A", "#
 _CSS = """<style>
 .rp-grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:4px 0 14px}
 .rp-t{font-size:1.05rem;font-weight:600;color:#fafafa;margin:0 0 8px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rp-card{background:#1e1e2e;border-radius:12px;border-top:4px solid;box-sizing:border-box;padding:12px 16px;height:196px;
+.rp-card{background:#1e1e2e;border-radius:12px;border-top:4px solid;box-sizing:border-box;padding:9px 16px;height:184px;
  display:flex;flex-direction:column;overflow:hidden}
 .rp-top{display:flex;align-items:baseline;justify-content:space-between;font-size:11px;color:#8892a4}
 .rp-top b{font-size:28px;color:#fff;line-height:1.1}.rp-top b i{font-style:normal;font-size:11px;font-weight:400;margin-left:4px}
-.rp-ln{height:1px;background:#2a2a3a;margin:8px 0}
+.rp-ln{height:1px;background:#2a2a3a;margin:5px 0}
 .rp-nm{font-size:19px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rp-sb{font-size:13px;margin-top:2px}
-.rpk-janela{height:56px;overflow:hidden;position:relative}.rpk-fade .rpk-item{position:absolute;inset:0}
-.rpk-item{height:56px;display:flex;flex-direction:column;justify-content:center}
-.rpk-nome{font-size:19px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rpk-janela{height:50px;overflow:hidden;position:relative}.rpk-fade .rpk-item{position:absolute;inset:0}
+.rpk-item{height:50px;display:flex;flex-direction:column;justify-content:center}
+.rpk-nome{font-size:17px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rpk-sub{font-size:13px}
 .rpk-ponto{width:6px;height:6px;border-radius:50%;background:#4b5563;display:inline-block;margin:0 2px}
 @media (prefers-reduced-motion:reduce){.rp-card [class*=rpk],.rp-card [class$=l],.rpk-ponto{animation:none !important}.rpk-fade .rpk-item{opacity:1 !important}.rpk-fade .rpk-item:not(:first-child){display:none !important}}
@@ -54,9 +54,9 @@ _CSS = """<style>
 .rp-vl{font-size:15px;font-weight:700;color:#fff}
 .rp-barra{height:8px;border-radius:4px;background:rgba(128,128,128,0.18);overflow:hidden;margin:6px 0 4px}
 .rp-barra div{height:100%}
-.rp-lista{background:#1e1e2e;border-radius:12px;border-top:4px solid #E24B4A;padding:14px 18px}
+.rp-lista{background:#1e1e2e;border-radius:12px;border-top:4px solid #E24B4A;padding:10px 18px}
 .rp-q{display:grid;gap:8px;align-items:center;font-size:16px}
-.rp-qh{font-size:13.5px;color:#8892a4;text-align:center;line-height:1.2;padding-bottom:6px;border-bottom:1px solid #2a2a3a;align-items:end}
+.rp-qh{font-size:12.5px;color:#8892a4;text-align:center;line-height:1.15;padding-bottom:6px;border-bottom:1px solid #2a2a3a;align-items:end}
 .rp-q a{color:#fff;font-weight:600;text-decoration:none;white-space:nowrap}.rp-q a:hover{text-decoration:underline;color:#6db3f5}
 .rp-cad{vertical-align:-2px}.rp-cadc{display:flex;align-items:center;justify-content:center}
 .rp-ua{font-size:14.5px;text-align:center;line-height:1.4;color:#d1d5db;white-space:nowrap;font-weight:500}
@@ -66,7 +66,7 @@ _CSS = """<style>
 @keyframes rp-pisca{0%,100%{opacity:1}50%{opacity:.3}}@keyframes rp-contorno{0%,100%{box-shadow:inset 0 0 0 1.5px #E24B4A}50%{box-shadow:inset 0 0 0 1.5px rgba(226,75,74,0)}}@keyframes rp-anel{0%{box-shadow:0 0 0 0 rgba(226,75,74,.7)}70%,100%{box-shadow:0 0 0 8px rgba(226,75,74,0)}}.rp-cad-blq{border-radius:50%;animation:rp-anel 1.4s ease-out infinite}.rp-c-INVALIDO{background:rgba(226,75,74,.28);color:#f3a3a2}.rp-c-blq{box-shadow:inset 0 0 0 1.5px #E24B4A;animation:rp-contorno 1.2s ease-in-out infinite}.rp-c-VALIDANDO{background:rgba(55,138,221,.25);color:#8ec2f5}
 .rp-c-NAO_ANEXADO,.rp-c-PENDENTE{background:rgba(156,163,175,.22);color:#d1d5db}
 .rp-c-OK{background:rgba(34,197,94,.16);color:#6fd69a}.rp-c-ND{color:#6b7280;font-weight:400}
-.rp-qr{padding:5px 0;border-bottom:1px solid #26263a}.rp-pz{text-align:right;color:#8892a4;white-space:nowrap}
+.rp-qr .rp-pz{font-size:14px}.rp-qr{padding:4px 0;border-bottom:1px solid #26263a}.rp-pz{text-align:right;color:#8892a4;white-space:nowrap}
 @media (max-width:1350px){.rp-q{grid-template-columns:70px 22px minmax(0,1.8fr) repeat(var(--rpn),minmax(0,1fr)) 92px 96px 100px !important}.rp-c{font-size:11px;padding:0 2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:block;line-height:29px;text-align:center}}
 @media (max-width:760px){.rp-cli,.rp-pz{display:none}}
 </style>"""
@@ -120,6 +120,17 @@ def _plural(n: int, singular: str, plural: str) -> str:
     return singular if n == 1 else plural
 
 
+def _nomes_cheios(nomes: list) -> list:
+    """Nome completo do cliente para o ticker, em minúsculas com a inicial maiúscula ("ACME COMERCIO DE FRUTAS LTDA" -> "Acme Comercio De Frutas Ltda");
+    o que não couber na largura do card termina em reticências (o nome inteiro aparece ao passar o mouse)."""
+    ligacao = {"de", "da", "do", "das", "dos", "e"}
+    def palavra(p: str) -> str:
+        if p.lower() in ligacao:
+            return p.lower()
+        return p.upper() if len(p) <= 2 else p.capitalize()
+    return [" ".join(palavra(p) for p in str(n).replace(",", " ").split()) or "-" for n in nomes]
+
+
 def _card_descontos(df_cr: pd.DataFrame) -> str:
     titulo = "Descontos Contratuais Pendentes"
     desc = resumo_descontos_pendentes(df_cr)
@@ -130,7 +141,7 @@ def _card_descontos(df_cr: pd.DataFrame) -> str:
     if not pend:
         return _card(titulo, "Pendentes", 0, "título(s)", cor, "Tudo aplicado", "&nbsp;", "nenhum desconto a lançar")
     clientes = desc["por_cliente"][:10]
-    itens = [(c, f"{q:02d} {_plural(q, 'título', 'títulos')}", None) for c, q in zip(_nomes_curtos([x[0] for x in clientes]), [x[1] for x in clientes])]
+    itens = [(c, f"{q:02d} {_plural(q, 'título', 'títulos')}", None) for c, q in zip(_nomes_cheios([x[0] for x in clientes]), [x[1] for x in clientes])]
     rodape = f'{desc["clientes"]} cliente(s)' + (f' · <span style="color:#ef4444">{erros} com erro</span>' if erros else "")
     return _card(titulo, "Pendentes", pend, "título(s)", cor, "", "", rodape, itens=itens, chave="rpkd")
 
@@ -158,7 +169,7 @@ def _card_boletos(df_cr: pd.DataFrame) -> str:
         return _card(titulo, "Sem boleto", 0, "título(s)", _AZUL, "Nenhum liberado", "&nbsp;",
                      f"{bloq} bloqueado(s) por desconto pendente")
     top = livres.groupby("CLIENTE").size().sort_values(ascending=False).head(10)
-    itens = [(c, f"{int(q):02d} {_plural(int(q), 'título', 'títulos')}", None) for c, q in zip(_nomes_curtos([str(i) for i in top.index]), top.values)]
+    itens = [(c, f"{int(q):02d} {_plural(int(q), 'título', 'títulos')}", None) for c, q in zip(_nomes_cheios([str(i) for i in top.index]), top.values)]
     rodape = (f'{livres["COD_CLIENTE"].nunique()} cliente(s) · {vencidos} vencido(s)'
               + (f' · {bloq} bloqueado(s)' if bloq else ""))
     return _card(titulo, "Prontos para gerar", len(livres), "título(s)", _AZUL, "", "", rodape, itens=itens, chave="rpkb")
@@ -190,7 +201,7 @@ def _card_notas(notas) -> str:
     nomes = _nomes_clientes()
     cheios = [nomes.get(str(int(float(c))), f"Cliente {c}") for c in por.index]
     itens = []
-    for curto, (nb, nm) in zip(_nomes_curtos(cheios), por[["B", "M"]].itertuples(index=False)):
+    for curto, (nb, nm) in zip(_nomes_cheios(cheios), por[["B", "M"]].itertuples(index=False)):
         if nb:
             sub = f"{nb} {_plural(nb, 'bloqueante', 'bloqueantes')}" + (f" · {nm} manual" if nm else "")
             itens.append((curto, sub, _VERMELHO))
@@ -254,7 +265,7 @@ def _sirene(cor: str = "#E24B4A", tam: int = 34) -> str:
     return f'<img src="{uri}" width="{tam}" height="{tam}" alt="Alerta" style="display:block">'
 
 
-_SIRENE = _sirene()
+_SIRENE = _sirene(tam=26)
 
 
 def _relogio_alerta(cor: str = "#f5c070") -> str:
@@ -568,12 +579,13 @@ def render(df_cr: pd.DataFrame) -> None:
     c_tit, c_oc, c_xls, c_at = st.columns([6, 1.3, 1.4, 1.2], vertical_alignment="center")
     with c_tit:
         st.html("<style>@keyframes rp-anel-sirene{0%{box-shadow:0 0 0 0 rgba(226,75,74,.7)}70%,100%{box-shadow:0 0 0 12px rgba(226,75,74,0)}}"
-                ".rp-sirene{display:inline-flex;border-radius:50%;padding:4px;margin-right:14px;font-size:2rem;line-height:1;"
+                ".rp-sirene{display:inline-flex;border-radius:50%;padding:4px;margin-right:10px;line-height:1;"
                 "animation:rp-anel-sirene 1.4s ease-out infinite}"
-                ".rp-h1{display:flex;align-items:center;padding:1.25rem 0 1rem;font-size:2.75rem !important;font-weight:700;line-height:1.2;color:#fafafa;"
+                ".rp-h1{display:flex;align-items:center;padding:.5rem 0 .25rem;font-size:1.9rem !important;font-weight:700;line-height:1.2;color:#fafafa;"
                 "font-family:inherit;white-space:nowrap}</style>"
-                f"<div class='rp-h1'><span class='rp-sirene'>{_SIRENE}</span><span style='font-size:2.75rem'>Resumo Pendências</span></div>"
-                f"<div style='font-size:12px;color:#6b7280;margin:-6px 0 4px 2px'>Última atualização {momento:%d/%m} às {momento:%H:%M}</div>")
+                f"<div class='rp-h1'><span class='rp-sirene'>{_SIRENE}</span><span style='font-size:1.9rem'>Resumo Pendências</span>"
+                f"<span style='font-size:12px;font-weight:400;color:#6b7280;margin-left:14px;align-self:flex-end;padding-bottom:5px'>Última atualização {momento:%d/%m} às {momento:%H:%M}</span></div>"
+                "<style>.st-key-btn_ocultar_rp button,.st-key-rp_atualizar button,.st-key-rp_excel button{min-height:2rem;padding:.15rem .6rem}</style>")
     with c_oc:
         st.button("Ocultar" if not ocultar else "Exibir", icon=":material/visibility_off:" if not ocultar else ":material/visibility:",
                   key="btn_ocultar_rp", use_container_width=True, help="Ocultar/exibir o valor em R$ do cartão Esperado e Recebido no banco",
@@ -599,14 +611,17 @@ def render(df_cr: pd.DataFrame) -> None:
         return
     desbloquear = _para_desbloquear(notas)
     n_vm = int(notas["TIPO"].isin(["MANUAL", "PEDIDO"]).sum())
-    filtro = st.segmented_control("Notas", ["Todas", "Bloqueantes", "Validação manual", "A vencer (sem anexo)"], default="Todas",
-                                  key="rp_filtro", label_visibility="collapsed",
-                                  format_func=lambda o: f"Validação manual ({n_vm})" if o == "Validação manual" else o) or "Todas"
+    c_filtro, c_busca = st.columns([1.6, 1], vertical_alignment="center")      # filtro e busca de cliente na mesma linha
+    with c_filtro:
+        filtro = st.segmented_control("Notas", ["Todas", "Bloqueantes", "Validação manual", "A vencer (sem anexo)"], default="Todas",
+                                      key="rp_filtro", label_visibility="collapsed",
+                                      format_func=lambda o: f"Validação manual ({n_vm})" if o == "Validação manual" else o) or "Todas"
     # seletor de cliente igual ao da Situação Cliente: escolher mostra só o cliente; limpar (x) volta a mostrar todos. Vale para todas as abas.
     nomes_cli = _nomes_clientes()
     codigos = sorted({str(int(float(c))) for c in notas["COD_CLIENTE"] if pd.notna(c)}, key=lambda c: nomes_cli.get(c, c).upper())
-    cliente = st.selectbox("Cliente:", codigos, index=None, key="rp_cliente", placeholder="Buscar cliente por código ou nome...",
-                           format_func=lambda c: f"{nomes_cli.get(c, 'Cliente ' + c)} - {c}")
+    with c_busca:
+        cliente = st.selectbox("Cliente", codigos, index=None, key="rp_cliente", placeholder="Buscar cliente por código ou nome...",
+                               label_visibility="collapsed", format_func=lambda c: f"{nomes_cli.get(c, 'Cliente ' + c)} - {c}")
     st.html(_CSS + _grafico_notas(notas, filtro, cliente))
     with c_xls:
         botao_exportar_excel(lambda: _excel(notas, desbloquear), f"Resumo_Pendencias_{datetime.date.today():%Y%m%d}.xlsx",
