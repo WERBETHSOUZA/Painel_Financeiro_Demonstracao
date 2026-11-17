@@ -439,7 +439,18 @@ _ICONES_MENU = {
     "Comercial > Faturamento Cliente/Grupo": '<circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5a5 5 0 0 1 10 0"/>',
     "Comercial > Faturamento por UF": '<path d="M2.5 4 6 3l4 1.5 3.5-1v9L10 13.5 6 12l-3.5 1zM6 3v9M10 4.5v9"/>',
     "Resumo Pendências": '<rect x="2.5" y="11.5" width="11" height="2.5" rx="1"/><path d="M4.5 11.5V8a3.5 3.5 0 0 1 7 0v3.5"/><path d="M8 1v2M2.6 3.2l1.3 1.3M13.4 3.2l-1.3 1.3"/>',
+    "Admin": '<path d="M8 1.5 13 3.5v4c0 3-2.2 5.2-5 6-2.8-.8-5-3-5-6v-4z"/><path d="M5.8 8l1.7 1.7L10.5 6.5"/>',
+    "Sair": '<path d="M6.5 2.5h-3v11h3"/><path d="M10 5l3 3-3 3M13 8H6.5"/>',
 }
+_ICONE_PASTA_MENU = '<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3H6l1.5 1.5h5A1.5 1.5 0 0 1 14 6v5.5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5z"/>'
+
+
+def _icone_img(miolo: str, cor: str = "#8ec2f5", tam: int = 22) -> str:
+    """Ícone de traço (mesmo desenho dos botões do menu) como <img>, porque o st.html/markdown remove <svg> embutido."""
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="{cor}" stroke-width="1.5" '
+           f'stroke-linecap="round" stroke-linejoin="round">{miolo}</svg>')
+    return (f'<img src="data:image/svg+xml;base64,{base64.b64encode(svg.encode("utf-8")).decode("ascii")}" width="{tam}" height="{tam}" '
+            f'style="vertical-align:-4px;margin-right:8px">')
 
 
 def _slug_menu(txt: str) -> str:
@@ -452,7 +463,7 @@ def _css_icones_menu(_selo_pendencias: int = 0) -> str:
     Os botões do grupo são identificados pelo prefixo da chave (a chave do grupo muda a cada painel aberto)."""
     regras = []
     for nome, miolo in _ICONES_MENU.items():
-        cor = "#E24B4A" if nome == "Resumo Pendências" else "#8ec2f5"
+        cor = {"Resumo Pendências": "#E24B4A", "Sair": "#f5a3a3"}.get(nome, "#8ec2f5")
         svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="{cor}" stroke-width="1.5" '
                f'stroke-linecap="round" stroke-linejoin="round">{miolo}</svg>')
         uri = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
@@ -460,6 +471,8 @@ def _css_icones_menu(_selo_pendencias: int = 0) -> str:
             seletor = ".st-key-nav_hub_relatorios"
         elif nome == "Resumo Pendências":
             seletor = ".st-key-nav_resumo_pendencias"
+        elif nome in ("Admin", "Sair"):
+            seletor = f".st-key-{'admin' if nome == 'Admin' else 'sair'}_lateral"
         elif ">" in nome:
             seletor = f".st-key-nav_sub_{_slug_menu(nome)}"
         else:
@@ -467,7 +480,7 @@ def _css_icones_menu(_selo_pendencias: int = 0) -> str:
         regras.append(f'section[data-testid="stSidebar"] {seletor} button p::before, div[data-testid="stPopoverBody"] {seletor} button p::before'
                       f'{{background-image:url("{uri}")}}')
     comum = ('section[data-testid="stSidebar"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias, [class*="st-key-pop_"]) button p::before, '
-             'div[data-testid="stPopoverBody"] [class*="st-key-nav_sub_"] button p::before'
+             'div[data-testid="stPopoverBody"] :is([class*="st-key-nav_sub_"], .st-key-admin_lateral, .st-key-sair_lateral) button p::before'
              '{content:"" !important;display:inline-block;width:18px;height:18px;margin-right:10px;vertical-align:-3px;'
              'background-repeat:no-repeat;background-position:center;background-size:contain}'
              'section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias, '
@@ -827,11 +840,11 @@ with st.sidebar:
             atualizar(); setInterval(atualizar, 1000);
         </script>""", height=24)
         if eh_admin:
-            if st.button("🔐 Admin", key="admin_lateral", width="stretch",
+            if st.button("Admin", key="admin_lateral", width="stretch",
                          type="primary" if st.session_state["_painel_ativo"] == "Acessos" else "secondary"):
                 st.session_state["_painel_ativo"] = "Acessos"
                 st.rerun()
-        if st.button("Sair", icon=":material/logout:", key="sair_lateral", width="stretch"):
+        if st.button("Sair", key="sair_lateral", width="stretch"):
             st.session_state.clear()
             st.rerun()
     # Frase do dia logo abaixo do nome (uma por dia, a mesma para todos; lista em config/frases.py).
@@ -842,7 +855,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.divider()
-    st.markdown("### 📂 Menu")
+    st.markdown(f'<h3 style="padding:.4rem 0 .5rem;margin:0">{_icone_img(_ICONE_PASTA_MENU, "#8ec2f5")}Menu</h3>', unsafe_allow_html=True)
 
     def _resetar_filtros(nome_painel: str):
         st.session_state["_painel_ativo"] = nome_painel
