@@ -1,6 +1,8 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import base64
+import re
+import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 from config import frases
@@ -415,6 +417,62 @@ ROTULOS_MENU = {
     "Comercial > Faturamento Cliente/Grupo": "Faturamento por Cliente ou Grupo",
     "Comercial > Faturamento por UF": "Faturamento por Estado - MI",
 }
+
+# ── Ícones do menu lateral: traço fino de 16 px no mesmo estilo do cadeado (desenhados em SVG, sem emoji) ──
+# Chave = nome do grupo, do painel ("Grupo > Painel") ou "Resumo Pendências"; valor = miolo do SVG (viewBox 16x16).
+_ICONES_MENU = {
+    "Relatórios": '<rect x="3" y="2" width="10" height="12" rx="1.5"/><path d="M5.5 6h5M5.5 9h5M5.5 12h3"/>',
+    "Financeiro": '<circle cx="8" cy="8" r="6"/><path d="M10 6.2C9.4 5.5 6 5.4 6 7.1c0 1.9 4 1 4 2.9 0 1.6-3.4 1.6-4 .8M8 4v1M8 11v1"/>',
+    "Tesouraria": '<path d="M2 6.5 8 3l6 3.5zM4.5 8v3.5M8 8v3.5M11.5 8v3.5M2 13.5h12"/>',
+    "Comercial": '<rect x="3" y="5.5" width="10" height="8.5" rx="1.5"/><path d="M5.5 5.5v-1a2.5 2.5 0 0 1 5 0v1"/>',
+    "Financeiro > Visão Geral MI-ME": '<path d="M4 13V9M8 13V4M12 13V7M2.5 14h11"/>',
+    "Financeiro > Mercado Interno": '<path d="M8 14s-4.5-4-4.5-7.5a4.5 4.5 0 0 1 9 0C12.5 10 8 14 8 14z"/><circle cx="8" cy="6.5" r="1.6"/>',
+    "Financeiro > Mercado Externo": '<circle cx="8" cy="8" r="6"/><ellipse cx="8" cy="8" rx="2.5" ry="6"/><path d="M2 8h12"/>',
+    "Financeiro > Inconsistências": '<circle cx="8" cy="8" r="6"/><path d="M8 4.8v4M8 11.2v.1"/>',
+    "Tesouraria > Saldos Bancários": '<rect x="2" y="4" width="12" height="9" rx="1.5"/><path d="M2 7h12"/><circle cx="11" cy="10" r=".6"/>',
+    "Tesouraria > Extratos Bancários": '<path d="M3 6h10M10.5 3.5 13 6l-2.5 2.5M13 10.5H3M5.5 8 3 10.5 5.5 13"/>',
+    "Tesouraria > Recebimento por Banco": '<path d="M8 2v7M5 6.5l3 3 3-3M3 11v2.5h10V11"/>',
+    "Comercial > Visão Geral Comercial": '<circle cx="8" cy="8" r="6"/><path d="M10.5 5.5 9 9 5.5 10.5 7 7z"/>',
+    "Comercial > Grupo de Crédito": '<rect x="2" y="4" width="12" height="8.5" rx="1.5"/><path d="M2 7h12M4 10h2.5"/>',
+    "Comercial > Situação Cliente": '<circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/>',
+    "Comercial > Faturamento Cliente/Grupo": '<circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5a5 5 0 0 1 10 0"/>',
+    "Comercial > Faturamento por UF": '<path d="M2.5 4 6 3l4 1.5 3.5-1v9L10 13.5 6 12l-3.5 1zM6 3v9M10 4.5v9"/>',
+    "Resumo Pendências": '<rect x="2.5" y="11.5" width="11" height="2.5" rx="1"/><path d="M4.5 11.5V8a3.5 3.5 0 0 1 7 0v3.5"/><path d="M8 1v2M2.6 3.2l1.3 1.3M13.4 3.2l-1.3 1.3"/>',
+}
+
+
+def _slug_menu(txt: str) -> str:
+    """Nome sem acento e sem símbolos, para a chave do botão e a classe CSS dele."""
+    return re.sub(r"[^a-z0-9]+", "_", unicodedata.normalize("NFKD", txt).encode("ascii", "ignore").decode().lower()).strip("_")
+
+
+def _css_icones_menu() -> str:
+    """CSS que desenha o ícone de cada botão do menu (imagem antes do texto; no menu recolhido, só a imagem).
+    Os botões do grupo são identificados pelo prefixo da chave (a chave do grupo muda a cada painel aberto)."""
+    regras = []
+    for nome, miolo in _ICONES_MENU.items():
+        cor = "#E24B4A" if nome == "Resumo Pendências" else "#8ec2f5"
+        svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="{cor}" stroke-width="1.5" '
+               f'stroke-linecap="round" stroke-linejoin="round">{miolo}</svg>')
+        uri = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        if nome == "Relatórios":
+            seletor = ".st-key-nav_hub_relatorios"
+        elif nome == "Resumo Pendências":
+            seletor = ".st-key-nav_resumo_pendencias"
+        elif ">" in nome:
+            seletor = f".st-key-nav_sub_{_slug_menu(nome)}"
+        else:
+            seletor = f'[class*="st-key-pop_{_slug_menu(nome)}_"]'
+        regras.append(f'section[data-testid="stSidebar"] {seletor} button p::before, div[data-testid="stPopoverBody"] {seletor} button p::before'
+                      f'{{background-image:url("{uri}")}}')
+    comum = ('section[data-testid="stSidebar"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias, [class*="st-key-pop_"]) button p::before, '
+             'div[data-testid="stPopoverBody"] [class*="st-key-nav_sub_"] button p::before'
+             '{content:"" !important;display:inline-block;width:18px;height:18px;margin-right:10px;vertical-align:-3px;'
+             'background-repeat:no-repeat;background-position:center;background-size:contain}'
+             'section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias, '
+             '[class*="st-key-pop_"]) button p::before{width:24px;height:24px;margin-right:0;vertical-align:middle}')
+    return "<style>" + comum + "".join(regras) + "</style>"
+
 PAINEIS_ADMIN = [
     ("📑", "Relatórios", PAGINAS_RELATORIOS),
     ("💲", "Financeiro", [
@@ -478,7 +536,7 @@ if not eh_admin:
     paineis = _menu_sem_teste
 # Resumo Pendências: só quem foi incluído no grupo fixo de mesmo nome (tela Acessos) vê o item, até o administrador
 if permissoes.tem_resumo_pendencias(usuario, _dados_perm):
-    paineis = [("⚠️", "Resumo Pendências")] + list(paineis)
+    paineis = [("🚨", "Resumo Pendências")] + list(paineis)
 paginas_relatorios_visiveis = {k: v for k, v in paginas_relatorios_visiveis.items() if k not in _desativados}
 st.session_state["_relatorios_visiveis"] = list(paginas_relatorios_visiveis)
 PAINEIS_FIXOS = ["Acessos"] if eh_admin else []  # abre pelo botão "Admin" ao lado de Sair, fora da lista do menu
@@ -798,6 +856,7 @@ with st.sidebar:
         st.rerun()
 
     painel_ativo_menu = st.session_state["_painel_ativo"] or ""
+    st.markdown(_css_icones_menu(), unsafe_allow_html=True)
 
     for item in paineis:
         if len(item) == 3:
@@ -805,7 +864,7 @@ with st.sidebar:
             if isinstance(paginas, dict):
                 # Relatórios: um único botão que abre a página de cartões.
                 ativo_hub = painel_ativo_menu == nome_pai or painel_ativo_menu.startswith(f"{nome_pai} > ")
-                if st.button(f"{icone} {nome_pai}", width="stretch", key="nav_hub_relatorios",
+                if st.button(nome_pai, width="stretch", key="nav_hub_relatorios",
                              type="primary" if ativo_hub else "secondary"):
                     if st.session_state["_painel_ativo"] != nome_pai:
                         _resetar_filtros(nome_pai)
@@ -813,19 +872,19 @@ with st.sidebar:
             ativo_no_grupo = (st.session_state["_painel_ativo"] or "").startswith(f"{nome_pai} > ")
             # Cada grupo é um botão que abre uma janelinha (popover) com os painéis: o menu fica sempre com uma linha por grupo
             # e os filtros dos relatórios, logo abaixo, não descem quando um grupo é aberto.
-            with st.popover(f"{icone} {nome_pai}", width="stretch", key=f"pop_{nome_pai}_{painel_ativo_menu}",   # chave nova a cada painel: a janelinha reabre fechada
+            with st.popover(nome_pai, width="stretch", key=f"pop_{_slug_menu(nome_pai)}_{painel_ativo_menu}",   # chave nova a cada painel: a janelinha reabre fechada
                             type="primary" if ativo_no_grupo else "secondary"):
                 st.markdown(f'<div class="pop-titulo">{nome_pai}</div>', unsafe_allow_html=True)
                 for sub_icone, sub_nome in paginas:
                     nome_completo = f"{nome_pai} > {sub_nome}"
-                    if st.button(f"{sub_icone} {ROTULOS_MENU.get(nome_completo, sub_nome)}", width="stretch", key=f"nav_{nome_completo}",
+                    if st.button(ROTULOS_MENU.get(nome_completo, sub_nome), width="stretch", key=f"nav_sub_{_slug_menu(nome_completo)}",
                                  type="primary" if painel_ativo_menu == nome_completo else "secondary"):
                         if st.session_state["_painel_ativo"] != nome_completo:
                             _resetar_filtros(nome_completo)
         else:
             icone, nome_painel = item
-            if st.button(f"{icone} {nome_painel}", width="stretch",
-                         key="nav_resumo_pendencias" if nome_painel == "Resumo Pendências" else f"nav_{nome_painel}",   # chave fixa: o menu recolhido mostra só o ícone
+            if st.button(nome_painel, width="stretch",
+                         key="nav_resumo_pendencias" if nome_painel == "Resumo Pendências" else f"nav_sub_{_slug_menu(nome_painel)}",   # chave fixa: o menu recolhido mostra só o ícone
                          type="primary" if painel_ativo_menu == nome_painel else "secondary"):
                 if st.session_state["_painel_ativo"] != nome_painel:
                     _resetar_filtros(nome_painel)

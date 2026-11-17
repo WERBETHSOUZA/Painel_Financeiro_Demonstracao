@@ -44,12 +44,12 @@ _CSS = """<style>
 .rp-ln{height:1px;background:#2a2a3a;margin:8px 0}
 .rp-nm{font-size:19px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rp-sb{font-size:13px;margin-top:2px}
-.rpk-janela{height:56px;overflow:hidden}
+.rpk-janela{height:56px;overflow:hidden;position:relative}.rpk-fade .rpk-item{position:absolute;inset:0}
 .rpk-item{height:56px;display:flex;flex-direction:column;justify-content:center}
 .rpk-nome{font-size:19px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rpk-sub{font-size:13px}
 .rpk-ponto{width:6px;height:6px;border-radius:50%;background:#4b5563;display:inline-block;margin:0 2px}
-@media (prefers-reduced-motion:reduce){.rp-card [class*=rpk],.rp-card [class$=l],.rpk-ponto{animation:none !important}}
+@media (prefers-reduced-motion:reduce){.rp-card [class*=rpk],.rp-card [class$=l],.rpk-ponto{animation:none !important}.rpk-fade .rpk-item{opacity:1 !important}.rpk-fade .rpk-item:not(:first-child){display:none !important}}
 .rp-mt{font-size:11px;color:#8892a4}
 .rp-vl{font-size:15px;font-weight:700;color:#fff}
 .rp-barra{height:8px;border-radius:4px;background:rgba(128,128,128,0.18);overflow:hidden;margin:6px 0 4px}
@@ -78,26 +78,19 @@ _ALT, _SEG = 56, 4   # altura de um cliente no ticker (px) e segundos por client
 def _ticker(chave: str, itens: list, cor: str) -> str:
     """Passa de cliente em cliente sozinho (nome e subtexto; pausa com o mouse em cima), só com CSS. `itens` = [(nome, subtexto,
     cor do subtexto ou None)]. Com um cliente só, não anima."""
-    def linha(i):
-        return (f'<div class="rpk-item" title="{escape(i[0], quote=True)}"><span class="rpk-nome">{escape(i[0])}</span>'
+    def linha(i, cls=""):
+        return (f'<div class="rpk-item{cls}" title="{escape(i[0], quote=True)}"><span class="rpk-nome">{escape(i[0])}</span>'
                 f'<span class="rpk-sub" style="color:{i[2] or cor}">{i[1]}</span></div>')
     if len(itens) == 1:
         return f'<div class="rpk-janela">{linha(itens[0])}</div>'
     n = len(itens)
-    quadros = "".join(f"{k * 100 / n:.3f}%,{k * 100 / n + 82 / n:.3f}%{{transform:translateY(-{_ALT * k}px)}}" for k in range(n))
-    quadros += f"100%{{transform:translateY(-{_ALT * n}px)}}"
-    pontos, anim = "", ""
-    for k in range(n):
-        a, b = k * 100 / n, (k + 1) * 100 / n
-        ini = f"0%,{a - 0.01:.3f}%{{background:#4b5563}}" if k else ""
-        fim = f"{b:.3f}%,100%{{background:#4b5563}}" if k < n - 1 else ""
-        anim += (f"@keyframes {chave}d{k}{{{ini}{a:.3f}%,{b - 0.01:.3f}%{{background:{cor}}}{fim}}}"
-                 f".{chave}d{k}{{animation:{chave}d{k} {_SEG * n}s infinite}}")
-        pontos += f'<span class="rpk-ponto {chave}d{k}"></span>'
-    return (f"<style>@keyframes {chave}{{{quadros}}}{anim}.{chave}l{{animation:{chave} {_SEG * n}s infinite}}"
-            f".rp-card:hover .{chave}l,.rp-card:hover .rpk-ponto{{animation-play-state:paused}}</style>"
-            f'<div class="rpk-janela"><div class="{chave}l">{"".join(linha(i) for i in itens + itens[:1])}</div></div>'
-            f'<div style="text-align:center;margin:0 0 4px">{pontos}</div>')
+    fatia = 100 / n                       # parte do ciclo em que cada cliente fica na tela
+    fade = fatia * 0.12                   # um nome some por completo antes de o próximo aparecer (sem os dois sobrepostos)
+    quadros = f"0%{{opacity:0}}{fade:.3f}%,{fatia - fade:.3f}%{{opacity:1}}{fatia:.3f}%,100%{{opacity:0}}"
+    atrasos = "".join(f".{chave}i{k}{{animation-delay:{k * _SEG}s}}" for k in range(n))
+    return (f"<style>@keyframes {chave}{{{quadros}}}.{chave}i{{opacity:0;animation:{chave} {_SEG * n}s linear infinite}}{atrasos}"
+            f".rp-card:hover .{chave}i{{animation-play-state:paused}}</style>"
+            f'<div class="rpk-janela rpk-fade">{"".join(linha(it, f" {chave}i {chave}i{k}") for k, it in enumerate(itens))}</div>')
 
 
 def _card(titulo: str, rotulo: str, numero, unidade: str, cor: str, destaque: str, sub: str, rodape: str,
@@ -246,6 +239,18 @@ def _cadeado(cor: str, aberto: bool, rotulo: str) -> str:
     return f'<img class="rp-cad{"" if aberto else " rp-cad-blq"}" src="{uri}" width="14" height="14" alt="{rotulo}" title="{rotulo}">'
 
 
+def _sirene(cor: str = "#E24B4A", tam: int = 34) -> str:
+    """Sirene de alerta (só contorno, no mesmo traço do cadeado) como <img> com SVG em data URI (o st.html remove <svg> embutido)."""
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="{tam}" height="{tam}" fill="none" stroke="{cor}" stroke-linecap="round" '
+           f'stroke-linejoin="round"><rect x="2.5" y="11.5" width="11" height="2.5" rx="1" stroke-width="1.4"/><path d="M4.5 11.5V8a3.5 3.5 0 0 1 7 0v3.5" '
+           f'stroke-width="1.5"/><path d="M8 1v2M2.6 3.2l1.3 1.3M13.4 3.2l-1.3 1.3" stroke-width="1.4"/></svg>')
+    uri = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f'<img src="{uri}" width="{tam}" height="{tam}" alt="Alerta" style="display:block">'
+
+
+_SIRENE = _sirene()
+
+
 def _relogio_alerta(cor: str = "#f5c070") -> str:
     """Relógio com ponto de exclamação (anexo depois do prazo), como <img> com SVG em data URI (o st.html remove <svg> embutido)."""
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="{cor}" '
@@ -298,7 +303,7 @@ def _estado_pedido(status, doc_status, motivo) -> str:
 
 def _pedidos_em_validacao():
     """Pedidos ainda sem nota com o pedido de compra do cliente ou o aceite do pedido pendente/inválido, no mesmo formato das notas (uma
-    linha por pedido, TIPO = "PEDIDO", ROTULO = "Pedido 21834"). Os mais antigos primeiro. None se o banco não respondeu."""
+    linha por pedido, TIPO = "PEDIDO", ROTULO = "PV 21834"). Os mais antigos primeiro. None se o banco não respondeu."""
     df = carregar_pedidos_em_validacao()
     if df is None:
         return None
@@ -318,7 +323,7 @@ def _pedidos_em_validacao():
             continue
         linhas.append({"COD_CLIENTE": cod, "NF": "", "CONTROLE": str(controle), "TIPO": "PEDIDO", "QTD_DOCS": len(estados), "PRAZO": pd.NaT,
                        "DOCUMENTOS": list(nomes.values()), "ESTADOS": estados, "NOMES": nomes, "BLOQUEANDO": {}, "ANEXADOS": {}, "VALIDADOS": {},
-                       "APOS_PRAZO": {}, "ULTIMO_ANEXO": pd.NaT, "EMISSAO": pd.NaT, "ROTULO": f"Pedido {int(pedido)}" if pd.notna(pedido) else "Pedido",
+                       "APOS_PRAZO": {}, "ULTIMO_ANEXO": pd.NaT, "EMISSAO": pd.NaT, "ROTULO": f"PV {int(pedido)}" if pd.notna(pedido) else "PV",
                        "GERADA": pd.to_datetime(g["GERADA"], errors="coerce").min()})
     return pd.DataFrame(linhas, columns=cols).sort_values("GERADA", na_position="last").reset_index(drop=True)
 
@@ -542,14 +547,27 @@ def _pre_carregar() -> None:
         pass
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _momento_dados() -> datetime.datetime:
+    """Hora em que os dados do painel foram buscados: guardada com o mesmo prazo (5 min) das consultas e limpa junto com elas no botão Atualizar."""
+    return datetime.datetime.now()
+
+
 def render(df_cr: pd.DataFrame) -> None:
+    momento = _momento_dados()
     # o botão Ocultar usa o mesmo estado do Contas a Receber (cr_ocultar): esconder valores vale para o app todo
     if "cr_ocultar" not in st.session_state:
         st.session_state["cr_ocultar"] = False
     ocultar = st.session_state["cr_ocultar"]
     c_tit, c_oc, c_xls, c_at = st.columns([6, 1.3, 1.4, 1.2], vertical_alignment="center")
     with c_tit:
-        st.title("Resumo Pendências")
+        st.html("<style>@keyframes rp-anel-sirene{0%{box-shadow:0 0 0 0 rgba(226,75,74,.7)}70%,100%{box-shadow:0 0 0 12px rgba(226,75,74,0)}}"
+                ".rp-sirene{display:inline-flex;border-radius:50%;padding:4px;margin-right:14px;font-size:2rem;line-height:1;"
+                "animation:rp-anel-sirene 1.4s ease-out infinite}"
+                ".rp-h1{display:flex;align-items:center;padding:1.25rem 0 1rem;font-size:2.75rem !important;font-weight:700;line-height:1.2;color:#fafafa;"
+                "font-family:inherit;white-space:nowrap}</style>"
+                f"<div class='rp-h1'><span class='rp-sirene'>{_SIRENE}</span><span style='font-size:2.75rem'>Resumo Pendências</span></div>"
+                f"<div style='font-size:12px;color:#6b7280;margin:-6px 0 4px 2px'>Última atualização {momento:%d/%m} às {momento:%H:%M}</div>")
     with c_oc:
         st.button("Ocultar" if not ocultar else "Exibir", icon=":material/visibility_off:" if not ocultar else ":material/visibility:",
                   key="btn_ocultar_rp", use_container_width=True, help="Ocultar/exibir o valor em R$ do cartão Esperado e Recebido no banco",
