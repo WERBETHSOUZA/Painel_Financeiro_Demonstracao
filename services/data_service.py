@@ -218,9 +218,9 @@ def carregar_pedidos_em_validacao():
     DOC_CODIGO, DOCUMENTO, STATUS, DOC_STATUS, MOTIVO, GERADA), inventados."""
     hoje = pd.Timestamp(date.today())
     ped = "Documento obrigatório Pedido de Compra - Cliente ainda não foi anexado ao checklist."
-    itens = [(1104, "PEDCOMPRA", "Pedido de Compra - Cliente", 0, None, ped, 16),
-             (1302, "PEDCOMPRA", "Pedido de Compra - Cliente", 0, None, ped, 0),
-             (1103, "PEDCOMPRA", "Pedido de Compra - Cliente", 0, None, ped, 9)]
+    itens = [(1104, "PEDCOMPRA", "Pedido de Compra - Cliente", 1, 0, ped, 16),      # anexado, em validação: aparece
+             (1302, "PEDCOMPRA", "Pedido de Compra - Cliente", 0, None, ped, 0),    # sem anexo: não aparece (nada a validar)
+             (1103, "PEDCOMPRA", "Pedido de Compra - Cliente", 1, 0, ped, 9)]
     linhas = []
     for i, (cod, dc, nome, st_, ds, mot, dias) in enumerate(itens):
         linhas.append({"COD_CLIENTE": cod, "CONTROLE": f"CTV-2026-{4100 + i * 37:06d}", "PEDIDO": 21000 + i * 211, "DOC_CODIGO": dc, "DOCUMENTO": nome,

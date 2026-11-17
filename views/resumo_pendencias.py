@@ -322,7 +322,7 @@ def _estado_pedido(status, doc_status, motivo) -> str:
 
 
 def _pedidos_em_validacao():
-    """Pedidos ainda sem nota com o pedido de compra do cliente ou o aceite do pedido pendente/inválido, no mesmo formato das notas (uma
+    """Pedidos ainda sem nota com o pedido de compra do cliente anexado e em validação (pedido sem anexo não entra), no mesmo formato das notas (uma
     linha por pedido, TIPO = "PEDIDO", ROTULO = "PV 21834"). Os mais antigos primeiro. None se o banco não respondeu."""
     df = carregar_pedidos_em_validacao()
     if df is None:
@@ -340,6 +340,8 @@ def _pedidos_em_validacao():
             if _GRAVIDADE[e] >= _GRAVIDADE.get(estados.get(c), -1):
                 estados[c] = e
         if "INVALIDO" in estados.values():      # pedido inválido é cancelado (não gera venda); o cliente precisa emitir outro, então não é pendência
+            continue
+        if all(e == "NAO_ANEXADO" for e in estados.values()):   # nada anexado ainda: não há o que validar, então não é validação manual
             continue
         linhas.append({"COD_CLIENTE": cod, "NF": "", "CONTROLE": str(controle), "TIPO": "PEDIDO", "QTD_DOCS": len(estados), "PRAZO": pd.NaT,
                        "DOCUMENTOS": list(nomes.values()), "ESTADOS": estados, "NOMES": nomes, "BLOQUEANDO": {}, "ANEXADOS": {}, "VALIDADOS": {},
