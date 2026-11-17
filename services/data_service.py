@@ -179,7 +179,20 @@ def carregar_notas_pendentes_validacao():
                            "DOCUMENTO": "Pedido de venda", "DOC_STATUS": 1,
                            "ANEXADO_EM": hoje - pd.Timedelta(days=int(rng.randint(3, 9))), "VALIDADO_EM": hoje - pd.Timedelta(days=int(rng.randint(2, 8))), "NOTA_BLOQ": int(tipo == "bloq"), "NOTA_MANUAL": int(tipo == "manual"),
                        "NOTA_AVENCER": int(tipo == "avencer")})
-    df = pd.DataFrame(linhas)
+    # Aceite da carga (regra obrigatória que não bloqueia): em várias notas aparece sem anexo, em validação ou válido
+    rng_c = np.random.RandomState(nv.SEMENTE + 42)
+    extras = []
+    for (cod, controle, nf_), g in pd.DataFrame(linhas).groupby(["COD_CLIENTE", "CONTROLE", "NF"], sort=False):
+        sorteio = rng_c.rand()
+        if sorteio < 0.2:
+            continue                                         # a nota ainda não tem essa regra
+        status, doc_status = (0, None) if sorteio < 0.55 else (1, 0) if sorteio < 0.8 else (3, 1)
+        extras.append({"COD_CLIENTE": cod, "CONTROLE": controle, "NF": nf_, "STATUS": status, "BLOQUEIA": 0, "PRAZO": g["PRAZO"].max(),
+                       "EMISSAO": g["EMISSAO"].max(), "MOTIVO": "Evidência do aceite da carga", "DOC_CODIGO": "ACEITECARGA",
+                       "DOCUMENTO": "Evidencia do aceite da carga", "DOC_STATUS": doc_status,
+                       "ANEXADO_EM": (hoje - pd.Timedelta(hours=int(rng_c.randint(2, 60)))) if status else pd.NaT, "VALIDADO_EM": pd.NaT,
+                       "NOTA_BLOQ": int(g["NOTA_BLOQ"].max()), "NOTA_MANUAL": int(g["NOTA_MANUAL"].max()), "NOTA_AVENCER": int(g["NOTA_AVENCER"].max())})
+    df = pd.DataFrame(linhas + extras)
     df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
     return df
 

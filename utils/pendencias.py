@@ -117,7 +117,8 @@ _GRAVIDADE = {"INVALIDO": 4, "VALIDANDO": 3, "NAO_ANEXADO": 2, "PENDENTE": 1, "O
 ESTADO_ROTULO = {"INVALIDO": "Inválido", "VALIDANDO": "Em validação", "NAO_ANEXADO": "Pendente", "PENDENTE": "Pendente", "OK": "Válido"}
 # documentos que aparecem como coluna (os que bloqueiam e o Pedido de venda, que aparece Válido), nesta ordem: (código no SyncProcess, nome na coluna larga, sigla na coluna estreita)
 _DOCS_ORDEM = [("CNH", "CNH do motorista", "CNH"), ("NFCANHOTO", "NF com canhoto", "NF"), ("CARTATEMP", "Carta de temperatura", "Cart."),
-               ("PEDVENDA", "Pedido de venda", "PV"), ("ACEITEPED", "Aceite do pedido", "Ac."), ("PEDCOMPRA", "Pedido de compra", "Ped.")]
+               ("PEDVENDA", "Pedido de venda", "PV"), ("ACEITEPED", "Aceite do pedido", "Ac."), ("PEDCOMPRA", "Pedido de compra", "Ped."),
+               ("ACEITECARGA", "Aceite da carga", "Ac.C")]
 
 
 def _estado_documento(status, doc_status=None) -> str:
@@ -240,7 +241,7 @@ def colunas_documentos(notas) -> list:
     for estados, nomes in zip(notas["ESTADOS"], notas["NOMES"]):
         for c in estados:
             achados.setdefault(c, nomes.get(c, c))
-    cols = [(c, achados.get(c) or n, sg) for c, n, sg in _DOCS_ORDEM if c in achados]
+    cols = [(c, n if c == "ACEITECARGA" else (achados.get(c) or n), sg) for c, n, sg in _DOCS_ORDEM if c in achados]   # Aceite da carga: nome fixo, o do banco é "Evidencia do aceite..."
     conhecidos = {x[0] for x in _DOCS_ORDEM}
     cols += [(c, achados[c], achados[c][:4]) for c in sorted(achados) if c not in conhecidos]
     return cols

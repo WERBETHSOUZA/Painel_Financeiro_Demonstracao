@@ -67,7 +67,7 @@ _CSS = """<style>
 .rp-c-NAO_ANEXADO,.rp-c-PENDENTE{background:rgba(156,163,175,.22);color:#d1d5db}
 .rp-c-OK{background:rgba(34,197,94,.16);color:#6fd69a}.rp-c-ND{color:#6b7280;font-weight:400}
 .rp-qr .rp-pz{font-size:14px}.rp-qr{padding:4px 0;border-bottom:1px solid #26263a}.rp-pz{text-align:right;color:#8892a4;white-space:nowrap}
-@media (max-width:1350px){.rp-q{grid-template-columns:70px 22px minmax(0,1.8fr) repeat(var(--rpn),minmax(0,1fr)) 92px 96px 100px !important}.rp-c{font-size:11px;padding:0 2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:block;line-height:29px;text-align:center}}
+@media (max-width:1350px){.rp-q{grid-template-columns:70px 22px minmax(0,1.8fr) repeat(var(--rpn),minmax(0,1fr)) 92px 84px 84px !important}.rp-c{font-size:11px;padding:0 2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:block;line-height:29px;text-align:center}}
 @media (max-width:760px){.rp-cli,.rp-pz{display:none}}
 </style>"""
 
@@ -438,17 +438,20 @@ def _grafico_notas(notas, filtro: str, cliente: str | None = None) -> str:
     if d.empty:
         return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Nenhuma nota ou pedido neste filtro.</span></div>'
     cols = colunas_documentos(d)
-    grade = (f"grid-template-columns:70px 22px minmax(150px,1fr) repeat({len(cols)},minmax(104px,116px)) 124px 128px 128px;--rpn:{len(cols)}")   # cartões dos documentos estreitos: sobra espaço para o nome do cliente
+    grade = (f"grid-template-columns:70px 22px minmax(150px,1fr) repeat({len(cols)},minmax(104px,116px)) 124px 92px 92px;--rpn:{len(cols)}")   # cartões dos documentos estreitos: sobra espaço para o nome do cliente
     topo = (f'<div class="rp-q rp-qh" style="{grade}"><span style="text-align:left">NF / Pedido</span><span class="rp-cadc"></span><span class="rp-cli" style="text-align:left">Cliente</span>'
             + "".join(f'<span title="{escape(nome, quote=True)}">{escape(nome)}</span>' for _, nome, _ in cols)
             + '<span>Último anexo</span><span class="rp-pz">Emissão da NF</span><span class="rp-pz">Prazo</span></div>')
     linhas = ""
     for r in d.itertuples(index=False):
         cli = nomes.get(str(int(float(r.COD_CLIENTE))), f"Cliente {r.COD_CLIENTE}")
-        prazo = r.PRAZO.strftime("%d/%m/%Y %H:%M") if pd.notna(r.PRAZO) else "—"
-        emissao = pd.Timestamp(r.EMISSAO).strftime("%d/%m/%Y %H:%M") if pd.notna(r.EMISSAO) else "—"
-        dica_pz = (f' title="Prazo de {(pd.Timestamp(r.PRAZO) - pd.Timestamp(r.EMISSAO)).total_seconds() / 86400:.0f} dias após a emissão da NF"'
-                   if pd.notna(r.EMISSAO) and pd.notna(r.PRAZO) else "")
+        prazo = _dt_curta(r.PRAZO)
+        emissao = _dt_curta(r.EMISSAO)
+        _cheia = lambda t: pd.Timestamp(t).strftime("%d/%m/%Y %H:%M")                 # data completa na dica; a célula mostra a curta
+        dica_em = f' title="Emissão da NF: {_cheia(r.EMISSAO)}"' if pd.notna(r.EMISSAO) else ""
+        dica_pz = (f' title="Prazo: {_cheia(r.PRAZO)}'
+                   + (f" ({(pd.Timestamp(r.PRAZO) - pd.Timestamp(r.EMISSAO)).total_seconds() / 86400:.0f} dias após a emissão da NF)" if pd.notna(r.EMISSAO) else "")
+                   + '"') if pd.notna(r.PRAZO) else ""
         bloqueado = credito.get(str(int(float(r.COD_CLIENTE))))
         cad = "" if bloqueado is None else (_CADEADO_FECHADO if bloqueado else _CADEADO_ABERTO)
         url = url_controle_venda(r.CONTROLE)
@@ -476,7 +479,7 @@ def _grafico_notas(notas, filtro: str, cliente: str | None = None) -> str:
             ultimo = f'<span class="rp-ua" style="color:#6b7280"{dica_g}>sem anexo</span>'
         linhas += (f'<div class="rp-q rp-qr" style="{grade}">{nf}<span class="rp-cadc">{cad}</span><span class="rp-cli" title="Abrir os controles de venda de {escape(cli, quote=True)} no SyncProcess">'
                    f'<a href="{url_busca_controles(cli)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">{escape(cli)}</a></span>'
-                   f'{celulas}{ultimo}<span class="rp-pz">{emissao}</span><span class="rp-pz"{dica_pz}>{prazo}</span></div>')
+                   f'{celulas}{ultimo}<span class="rp-pz"{dica_em}>{emissao}</span><span class="rp-pz"{dica_pz}>{prazo}</span></div>')
     legenda = ('<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#8892a4;margin-top:10px">'
                '<span><span style="color:#E24B4A">●</span> inválido</span><span><span style="color:#378ADD">●</span> em validação</span>'
                '<span><span style="color:#9ca3af">●</span> pendente (sem documento)</span><span><span style="color:#22c55e">●</span> válido</span>'
@@ -484,6 +487,15 @@ def _grafico_notas(notas, filtro: str, cliente: str | None = None) -> str:
                '<span>— a regra não vale para a nota</span><span>' + _CADEADO_FECHADO + ' crédito bloqueado · ' + _CADEADO_ABERTO + ' crédito liberado</span><span>clique na NF para abrir o controle de venda e no nome do cliente para ver os controles dele no SyncProcess</span></div>')
     return (f'<div class="rp-lista">{cabeca}{topo}<div style="max-height:420px;overflow-y:auto;scrollbar-width:thin;'
             f'scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>{legenda}</div>')
+
+
+def _dt_curta(ts) -> str:
+    """"13/11 10:00" para datas do ano em curso (o ano é o mesmo da tela) e "13/11/2027 10:00" para as de outro ano; "—" se vazio. A data completa
+    continua na dica ao passar o mouse (title da célula)."""
+    if pd.isna(ts):
+        return "—"
+    t = pd.Timestamp(ts)
+    return t.strftime("%d/%m %H:%M") if t.year == datetime.date.today().year else t.strftime("%d/%m/%Y %H:%M")
 
 
 def _prazo_txt(p) -> str:
@@ -619,9 +631,19 @@ def render(df_cr: pd.DataFrame) -> None:
     # seletor de cliente igual ao da Situação Cliente: escolher mostra só o cliente; limpar (x) volta a mostrar todos. Vale para todas as abas.
     nomes_cli = _nomes_clientes()
     codigos = sorted({str(int(float(c))) for c in notas["COD_CLIENTE"] if pd.notna(c)}, key=lambda c: nomes_cli.get(c, c).upper())
+    # a busca do seletor olha o texto de cada opção; por isso as NFs do cliente entram no texto (a lista continua mostrando "nome - código")
+    nfs_cli: dict = {}
+    for c_, nf_ in zip(notas["COD_CLIENTE"], notas["NF"]):
+        if pd.notna(c_) and str(nf_).strip():
+            nfs_cli.setdefault(str(int(float(c_))), []).append(str(nf_).strip())
+
+    def _rotulo_cliente(c: str) -> str:
+        nfs = sorted(set(nfs_cli.get(c, [])))
+        return f"{nomes_cli.get(c, 'Cliente ' + c)} - {c}" + (f" · NF {', '.join(nfs[:10])}{'…' if len(nfs) > 10 else ''}" if nfs else "")
+
     with c_busca:
-        cliente = st.selectbox("Cliente", codigos, index=None, key="rp_cliente", placeholder="Buscar cliente por código ou nome...",
-                               label_visibility="collapsed", format_func=lambda c: f"{nomes_cli.get(c, 'Cliente ' + c)} - {c}")
+        cliente = st.selectbox("Cliente", codigos, index=None, key="rp_cliente", placeholder="Buscar por código, nome ou número da NF...",
+                               label_visibility="collapsed", format_func=_rotulo_cliente)
     st.html(_CSS + _grafico_notas(notas, filtro, cliente))
     with c_xls:
         botao_exportar_excel(lambda: _excel(notas, desbloquear), f"Resumo_Pendencias_{datetime.date.today():%Y%m%d}.xlsx",
