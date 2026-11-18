@@ -645,13 +645,22 @@ def _desenhar_cards(cards: list, df_cr: pd.DataFrame) -> None:
                           f"Boleto_Nao_Gerado_{datetime.date.today():%Y%m%d}.xlsx", st.session_state.get("_rp_xls_bol", False))
 
 
+def _sem_controle_repetido(notas: pd.DataFrame, pedidos) -> pd.DataFrame:
+    """Um controle de venda aparece uma vez só: o controle ainda sem nota (NF vazia) que já está na lista de pedidos sai das notas,
+    senão o mesmo controle vinha duas vezes ("NF nan" e "PV 21847"), enquanto o SyncProcess mostra uma validação."""
+    if notas is None or notas.empty or pedidos is None or pedidos.empty:
+        return notas
+    sem_nf = notas["NF"].fillna("").astype(str).str.strip().str.lower().isin(["", "nan", "none", "<na>"])
+    return notas[~(sem_nf & notas["CONTROLE"].astype(str).isin(set(pedidos["CONTROLE"].astype(str))))]
+
+
 def contar_validacao_manual() -> int:
     """Quantidade de pendências em validação manual de documentação (a mesma da aba Validação manual: notas + pedidos sem nota).
     Usada no selo do ícone do menu; bloqueantes e a vencer não entram. Usa as consultas já em cache; 0 se o banco não respondeu."""
     try:
-        notas = notas_pendentes_todas()
-        n = 0 if notas is None else int((notas["TIPO"] == "MANUAL").sum())
         pedidos = _pedidos_em_validacao()
+        notas = _sem_controle_repetido(notas_pendentes_todas(), pedidos)
+        n = 0 if notas is None else int((notas["TIPO"] == "MANUAL").sum())
         return n + (0 if pedidos is None else len(pedidos))
     except Exception:
         return 0
@@ -686,8 +695,9 @@ def render(df_cr: pd.DataFrame) -> None:
         _pre_carregar()
         notas = notas_pendentes_todas()
         if notas is not None:
-            notas = notas.assign(ROTULO="NF " + notas["NF"].astype(str), GERADA=pd.NaT)
             pedidos = _pedidos_em_validacao()                  # pedidos ainda sem nota: entram na Validação manual e em Todas
+            notas = _sem_controle_repetido(notas, pedidos).assign(GERADA=pd.NaT)
+            notas = notas.assign(ROTULO="NF " + notas["NF"].astype(str))
             if pedidos is not None and not pedidos.empty:
                 notas = pd.concat([notas, pedidos], ignore_index=True)
         cards = [_card_descontos(df_cr), _card_boletos(df_cr), _card_notas(notas), _card_esperado_recebido(df_cr, ocultar)]
