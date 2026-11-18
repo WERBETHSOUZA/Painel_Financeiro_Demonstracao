@@ -26,6 +26,9 @@ from views.contas_receber import (
 _MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 _OPACIDADES = ["1", "1", "1", "0.70", "0.55", "0.45", "0.38", "0.32", "0.28", "0.24", "0.21", "0.18", "0.16", "0.14", "0.12"]
 _VERDE, _VERMELHO, _AZUL, _AMBAR = "#22c55e", "#E24B4A", "#378ADD", "#F59E0B"
+# cores do gráfico por vendedor (sem vermelho nem o rosa da linha do ano anterior)
+_PALETA_VENDEDORES = [_AZUL, _VERDE, _AMBAR, "#A78BFA", "#2DD4BF", "#FB923C", "#60A5FA", "#A3E635", "#C084FC", "#FACC15", "#34D399", "#94A3B8"]
+_MAX_VENDEDORES_COR = len(_PALETA_VENDEDORES)
 _ROSA = "#e879f9"      # linha do ano anterior
 _MESES_NOME = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
 
@@ -294,16 +297,21 @@ def _bloco_vendas(df: pd.DataFrame, hoje: datetime.date, ocultar: bool) -> None:
         comparar = st.toggle("Comparar com ano anterior", key="vgc_cmp")
 
     per, tit, un, rotulo = _periodos(modo, ano_sel, mes_sel, hoje)
-    # vendedores: os 3 maiores do período e "Demais"
+    # vendedores: todos os que venderam no período, do maior para o menor, cada um com a sua cor; só passando de _MAX_VENDEDORES_COR
+    # (cores que ainda se distinguem) o que sobra vai somado em "Demais"
     ini_g, fim_g = per[0]["ini"], per[-1]["fim"]
     base = _soma(d, ini_g, fim_g)
-    tops = list(base.groupby("VENDEDOR")["VALOR_TOTAL_FATURADO"].sum().sort_values(ascending=False).head(3).index)
-    nomes = [_primeiro_e_ultimo(t) for t in tops] + ["Demais"]
-    cores = [_AZUL, _VERDE, _AMBAR, "#8892a4"]
+    por_vend = base.groupby("VENDEDOR")["VALOR_TOTAL_FATURADO"].sum().sort_values(ascending=False)
+    por_vend = por_vend[por_vend > 0]
+    tops = list(por_vend.index[:_MAX_VENDEDORES_COR])
+    com_demais = len(por_vend) > len(tops)
+    nomes = [_primeiro_e_ultimo(t) for t in tops] + (["Demais"] if com_demais else [])
+    cores = _PALETA_VENDEDORES[:len(tops)] + (["#8892a4"] if com_demais else [])
     for p in per:
         x = _soma(d, p["ini"], p["fim"]) if not p["futuro"] else d.iloc[0:0]
         linha = [float(x.loc[x["VENDEDOR"] == t, "VALOR_TOTAL_FATURADO"].sum()) for t in tops]
-        linha.append(float(x.loc[~x["VENDEDOR"].isin(tops), "VALOR_TOTAL_FATURADO"].sum()))
+        if com_demais:
+            linha.append(float(x.loc[~x["VENDEDOR"].isin(tops), "VALOR_TOTAL_FATURADO"].sum()))
         p["linha"], p["total"] = linha, sum(linha)
         p["comp"] = 0.0 if p["futuro"] else float(_soma(d, p["ini_c"], p["fim_c"])["VALOR_TOTAL_FATURADO"].sum())
 
