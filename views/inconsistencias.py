@@ -1,3 +1,5 @@
+import calendar
+import datetime
 import re
 
 import streamlit as st
@@ -26,14 +28,8 @@ def _inteiros_sem_decimal(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def render(df_erros: pd.DataFrame):
-    df_filtrado = _inteiros_sem_decimal(df_erros)
-
-    if len(df_filtrado) == 0:
-        st.title("Inconsistências de Lançamentos")
-        st.success("Nenhuma inconsistência encontrada.")
-        return
-
+def render(carregar_erros):
+    """`carregar_erros(data_inicio, data_fim)` busca no banco só o período escolhido (datas DD/MM/AAAA)."""
     _col_t, _col_at = st.columns([8, 1])
     with _col_t:
         st.title("Inconsistências de Lançamentos")
@@ -43,13 +39,45 @@ def render(df_erros: pd.DataFrame):
             st.cache_data.clear()
             st.rerun()
 
+    with st.sidebar:
+        st.caption("Inconsistências de Lançamentos")
+
+    # ── Filtro por período (barra lateral): abre no mês vigente (do dia 1 ao último dia) e vale para tudo na tela ──
+    hoje = datetime.date.today()
+    mes_vigente = (hoje.replace(day=1), hoje.replace(day=calendar.monthrange(hoje.year, hoje.month)[1]))
+    with st.sidebar:
+        periodo = st.date_input(
+            "Data (período)", value=mes_vigente, format="DD/MM/YYYY", key="inc_periodo",
+            help="Data do lançamento (prorrogada); abre no mês vigente. Só o período escolhido é buscado no banco; o dia final entra.",
+        )
+        gerar = st.button("Gerar Relatório", use_container_width=True, key="inc_gerar")
+    if gerar:
+        if isinstance(periodo, (tuple, list)) and len(periodo) == 2:
+            st.session_state["_inc_periodo"] = (periodo[0], periodo[1])
+        else:
+            st.session_state.pop("_inc_periodo", None)
+            st.warning("Selecione a data inicial e a final do período na barra lateral e clique em Gerar Relatório.")
+            return
+    periodo_sel = st.session_state.get("_inc_periodo")
+    if not periodo_sel:
+        st.info("O período abre no **mês vigente**. Ajuste-o na barra lateral, se precisar, e clique em **Gerar Relatório**.")
+        return
+    dt_ini, dt_fim = periodo_sel
+    titulo_periodo = f" — {dt_ini:%d/%m/%Y} a {dt_fim:%d/%m/%Y}"
+
+    with st.spinner("Carregando as inconsistências do período..."):
+        df_erros = carregar_erros(dt_ini.strftime("%d/%m/%Y"), dt_fim.strftime("%d/%m/%Y"))
+    df_filtrado = _inteiros_sem_decimal(df_erros)
+    if len(df_filtrado) == 0:
+        st.success(f"Nenhuma inconsistência entre {dt_ini:%d/%m/%Y} e {dt_fim:%d/%m/%Y}.")
+        return
+
     # ── Filtro por solicitante (barra lateral): vale para cards, resumo, tabela, Excel e imagem ──────────────
     _col_sol = next((c for c in df_filtrado.columns if "SOLICITANTE" in c), None)
     sol_sel = []
     if _col_sol:
         solicitantes_lista = sorted(df_filtrado[_col_sol].dropna().unique().tolist())
         with st.sidebar:
-            st.caption("Inconsistências de Lançamentos")
             sol_sel = st.multiselect("Solicitante", solicitantes_lista, key="inc_filtro_sol",
                                      placeholder="Todos os solicitantes")
         if sol_sel:
@@ -143,7 +171,7 @@ def render(df_erros: pd.DataFrame):
     arquivo_excel = exportar_excel(df_exib, "LANCAMENTOS_ERRO")
 
     # ── PNG ───────────────────────────────────────────────────────────────────
-    titulo_png = "Inconsistências de Lançamentos"
+    titulo_png = "Inconsistências de Lançamentos" + titulo_periodo
     if sol_sel:
         titulo_png += " — " + ", ".join(sol_sel)
     imagem_bytes = _gerar_imagem_cached(df_exib, titulo=titulo_png)

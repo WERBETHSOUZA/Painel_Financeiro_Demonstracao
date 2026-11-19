@@ -869,6 +869,8 @@ with st.sidebar:
             st.session_state.pop(chave_rmf, None)
         for chave_rfm in ["_rfm_periodo", "rfm_periodo"]:
             st.session_state.pop(chave_rfm, None)
+        for chave_inc in ["_inc_periodo", "inc_periodo", "inc_filtro_sol"]:     # Inconsistências abre de novo no mês vigente, sem relatório gerado
+            st.session_state.pop(chave_inc, None)
         for chave_rcmi in ["_rcmi_periodo", "rcmi_vencimento", "rcmi_status", "rcmi_grupo"]:
             st.session_state.pop(chave_rcmi, None)
         for chave in ["vencidas", "inconsistencias", "filtro_padrao",
@@ -1056,9 +1058,7 @@ with st.container():
             st.warning("Seu usuário ainda não tem acesso a nenhum painel. Solicite a liberação ao administrador.")
 
     elif painel_atual == "Financeiro > Inconsistências":
-        with st.spinner("Carregando dados..."):
-            df_erros = carregar_aps_erro()
-        inconsistencias.render(df_erros)
+        inconsistencias.render(carregar_aps_erro)       # o período é escolhido na tela e só ele vai ao banco
 
     elif painel_atual in ("Financeiro > Visão Geral MI-ME", "Financeiro > Mercado Interno", "Financeiro > Mercado Externo"):
         with st.spinner("Carregando dados..."):

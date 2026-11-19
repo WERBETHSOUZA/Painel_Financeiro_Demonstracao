@@ -12,6 +12,7 @@ Só aparece no menu de quem está no grupo fixo "Resumo Pendências" (tela Acess
 
 import base64
 import datetime
+import re
 import threading
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
@@ -25,7 +26,7 @@ from utils.exporters import exportar_excel_abas_recebimentos
 
 from services.data_service import (carregar_controles_abertos_mi, carregar_grupo_credito_geral, carregar_grupo_credito_saldo_agente,
                                    carregar_lista_clientes, carregar_notas_pendentes_validacao, carregar_recebido_periodo_mi,
-                                   carregar_pedidos_em_validacao, carregar_recebimento_hoje_mi)
+                                   carregar_pedidos_em_validacao, carregar_recebimento_hoje_mi, carregar_tratativas_pendentes)
 from utils.pendencias import _GRAVIDADE, ESTADO_ROTULO, _ha_dias, _quando, colunas_documentos, dica_documento, notas_pendentes_todas, url_busca_controles, url_controle_venda
 from views.contas_receber import formatar_moeda
 from views.relatorio_boleto_nao_gerado import _status_boleto
@@ -67,9 +68,11 @@ _CSS = """<style>
 .rp-c-NAO_ANEXADO,.rp-c-PENDENTE{background:rgba(156,163,175,.22);color:#d1d5db}
 .rp-c-OK{background:rgba(34,197,94,.16);color:#6fd69a}.rp-c-ND{color:#6b7280;font-weight:400}
 .rp-qr .rp-pz{font-size:14px}.rp-qr{padding:4px 0;border-bottom:1px solid #26263a}.rp-pz{text-align:right;color:#8892a4;white-space:nowrap}
-@media (max-width:1350px){.rp-q{grid-template-columns:70px 22px minmax(0,1.8fr) repeat(var(--rpn),minmax(0,1fr)) 92px 84px 84px !important}.rp-c{font-size:11px;padding:0 2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:block;line-height:29px;text-align:center}}
-@media (max-width:760px){.rp-cli,.rp-pz{display:none}}
 </style>"""
+
+
+_CSS_RQ = ('<style>.rp-rq{display:grid;gap:8px;align-items:center;font-size:14px}.rp-rcl{color:#aab2c5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+           '.rp-rq a{color:#fff;font-weight:600;text-decoration:none}.rp-rq a:hover{text-decoration:underline;color:#6db3f5}</style>')   # linhas de tabela dos dois cards lado a lado
 
 
 _ALT, _SEG = 56, 4   # altura de um cliente no ticker (px) e segundos por cliente
@@ -363,7 +366,7 @@ def _filtrar_busca(d: pd.DataFrame, busca: str, nomes: dict) -> pd.DataFrame:
 def _para_desbloquear(notas) -> pd.DataFrame | None:
     """Clientes para analisar o desbloqueio: o grupo dele está bloqueado no Grupo de Crédito (bloqueado, cadastro bloqueado,
     inadimplente ou suspenso), ele tem controle de venda ABERTO e NENHUM cliente do grupo tem pendência em documento que bloqueia
-    ou em validação (esses ficam no quadro de notas). Colunas: COD, NOME, SITUACAO, CONTROLES (lista de (controle, NF)), ordenado
+    ou em validação (esses ficam no quadro de notas). Colunas: COD, NOME, GRUPO (código do grupo de crédito), SITUACAO, CONTROLES (lista de (controle, NF)), ordenado
     por mais controles abertos. None se faltar alguma consulta."""
     try:
         geral, agentes = carregar_grupo_credito_geral(), carregar_grupo_credito_saldo_agente()
@@ -386,8 +389,8 @@ def _para_desbloquear(notas) -> pd.DataFrame | None:
             t = sit.get(grupo, "")
             if not any(x in t.upper() for x in ("BLOQ", "INADIMPL", "SUSPENS")) or grupo in grupos_com_nota or cod not in por_cliente:
                 continue
-            linhas.append({"COD": cod, "NOME": str(nome), "SITUACAO": t, "CONTROLES": sorted(por_cliente[cod], key=lambda x: x[1], reverse=True)})
-        out = pd.DataFrame(linhas, columns=["COD", "NOME", "SITUACAO", "CONTROLES"]).drop_duplicates("COD")
+            linhas.append({"COD": cod, "NOME": str(nome), "GRUPO": "" if grupo is None else str(grupo), "SITUACAO": t, "CONTROLES": sorted(por_cliente[cod], key=lambda x: x[1], reverse=True)})
+        out = pd.DataFrame(linhas, columns=["COD", "NOME", "GRUPO", "SITUACAO", "CONTROLES"]).drop_duplicates("COD")
         if out.empty:
             return out
         out["_n"] = out["CONTROLES"].map(len)
@@ -397,28 +400,102 @@ def _para_desbloquear(notas) -> pd.DataFrame | None:
 
 
 def _html_para_desbloquear(df) -> str:
-    cabeca = ('<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
-              '<span style="color:#e0e0e0;font-size:14px;font-weight:600">Para desbloquear · bloqueados no crédito, sem pendência documental</span>'
-              f'<span style="font-size:11px;color:#8892a4">{0 if df is None else len(df)} cliente(s) · com controle de venda aberto</span></div>')
+    cabeca = ('<div style="margin-bottom:8px"><div style="color:#e0e0e0;font-size:14px;font-weight:600">Para desbloquear</div>'
+              '<div style="font-size:11px;color:#8892a4;margin-top:2px">Bloqueados no crédito, sem pendência documental · '
+              f'{0 if df is None else len(df)} cliente(s) com controle aberto</div></div>')
     if df is None:
-        return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Não foi possível consultar agora.</span></div>'
+        return f'<div class="rp-lista" style="border-top-color:#F59E0B;height:100%;box-sizing:border-box">{cabeca}<span style="color:#8892a4;font-size:13px">Não foi possível consultar agora.</span></div>'
     if df.empty:
-        return f'<div class="rp-lista">{cabeca}<span style="color:#8892a4;font-size:13px">Nenhum cliente nesta situação.</span></div>'
-    grade = "grid-template-columns:22px minmax(0,2fr) 90px 150px 80px"
-    topo = (f'<div class="rp-q rp-qh" style="{grade}"><span></span><span style="text-align:left">Cliente</span><span class="rp-pz" style="text-align:left">Código</span>'
-            '<span style="text-align:left">Situação do crédito</span><span class="rp-pz">Controles</span></div>')
+        return f'<div class="rp-lista" style="border-top-color:#F59E0B;height:100%;box-sizing:border-box">{cabeca}<span style="color:#8892a4;font-size:13px">Nenhum cliente nesta situação.</span></div>'
+    grade = "grid-template-columns:20px minmax(0,1fr) 54px 52px 82px 46px"
+    topo = (f'<div class="rp-rq rp-qh" style="{grade}"><span></span><span style="text-align:left">Cliente</span><span class="rp-pz" style="text-align:left">Código</span>'
+            '<span class="rp-pz" style="text-align:left">Grupo</span><span style="text-align:left">Crédito</span><span class="rp-pz">Ctrl.</span></div>')
     linhas = ""
     for r in df.itertuples(index=False):
-        linhas += (f'<div class="rp-q rp-qr" style="{grade}"><span class="rp-cadc">{_CADEADO_FECHADO}</span>'
-                   f'<span class="rp-cli" title="Abrir os controles de venda de {escape(r.NOME, quote=True)} no SyncProcess">'
+        linhas += (f'<div class="rp-rq rp-qr" style="{grade}"><span class="rp-cadc">{_CADEADO_FECHADO}</span>'
+                   f'<span class="rp-rcl" title="Abrir os controles de venda de {escape(r.NOME, quote=True)} no SyncProcess">'
                    f'<a href="{url_busca_controles(r.NOME)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">{escape(r.NOME)}</a></span>'
-                   f'<span class="rp-pz" style="text-align:left">{escape(r.COD)}</span>'
-                   f'<span style="color:#f3a3a2;font-size:12px">{escape(r.SITUACAO.capitalize())}</span><span class="rp-pz">{len(r.CONTROLES)}</span></div>')
-    rodape = ('<div style="font-size:11px;color:#8892a4;margin-top:10px;line-height:1.6">Sai da lista quando o grupo for liberado no Grupo de Crédito, '
-              'quando o controle fechar ou quando surgir pendência em documento que bloqueia (aí vai para o quadro de notas). Clique no nome do '
-              'cliente para ver os controles dele no SyncProcess. Lista de análise: o bloqueio pode ser de crédito (limite, inadimplência), não só documental.</div>')
-    return (f'<div class="rp-lista" style="border-top-color:#F59E0B">{cabeca}{topo}<div style="max-height:320px;overflow-y:auto;'
-            f'scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>{rodape}</div>')
+                   f'<span class="rp-pz" style="text-align:left">{escape(r.COD)}</span><span class="rp-pz" style="text-align:left">{escape(r.GRUPO)}</span>'
+                   f'<span style="color:#f3a3a2;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{escape(r.SITUACAO.capitalize())}</span>'
+                   f'<span class="rp-pz">{len(r.CONTROLES)}</span></div>')
+    dica = ("Sai da lista quando o grupo for liberado no Grupo de Crédito, quando o controle fechar ou quando surgir pendência em documento que bloqueia "
+            "(aí vai para o quadro de notas). Clique no nome do cliente para ver os controles dele no SyncProcess. Lista de análise: o bloqueio pode ser "
+            "de crédito (limite, inadimplência), não só documental.")
+    rodape = (f'<div title="{escape(dica, quote=True)}" style="font-size:11px;color:#8892a4;margin-top:8px;line-height:1.5">'
+              'Sai da lista quando o grupo for liberado ou o controle fechar. Passe o mouse para ver a regra completa.</div>')
+    return (f'<div class="rp-lista" style="border-top-color:#F59E0B;height:100%;box-sizing:border-box">{cabeca}<div style="overflow-x:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e"><div style="min-width:400px">{topo}'
+            f'<div style="max-height:156px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div></div></div>{rodape}</div>')   # largura mínima + rolagem lateral em tela pequena
+
+
+def _html_reclamacoes_pendentes(df, cliente: str | None, nomes: dict, df_cr: pd.DataFrame | None = None) -> str:
+    """Tabela pequena das tratativas de reclamação (devolução/desconto) no SyncProcess: pendentes primeiro (as há mais dias na frente), depois as aprovadas nos
+    últimos 30 dias, da mais recente à mais antiga (5 à vista, o resto na barra de rolagem). Saldo NF = o que ainda está em aberto da NF no Contas a
+    Receber (zerado = a NF já foi baixada, tratativa resolvida). Sem dados ou sem banco: não aparece."""
+    if df is None or df.empty:
+        return ""
+    d = df.copy()
+    d["COD"] = d["COD_CLIENTE"].map(lambda c: str(int(float(c))) if pd.notna(c) else "")
+    if cliente:
+        d = d[d["COD"] == str(cliente)]
+        if d.empty:
+            return ""
+    saldo = {}                                                   # saldo em aberto por (NF, cliente) no Contas a Receber; NF que não está lá = zerada
+    if df_cr is not None and not df_cr.empty and {"NF", "COD_CLIENTE", "SALDO_EM_ABERTO"} <= set(df_cr.columns):
+        base = df_cr.assign(_NF=df_cr["NF"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip(),
+                            _CLI=pd.to_numeric(df_cr["COD_CLIENTE"], errors="coerce").astype("Int64").astype(str))
+        saldo = base.groupby(["_NF", "_CLI"])["SALDO_EM_ABERTO"].sum().to_dict()
+    hoje = pd.Timestamp.today().normalize()
+    pend = d[d["APROVADA"].isna()].sort_values("DEFINIDA", na_position="last")                  # pendentes: as mais antigas (mais dias esperando) primeiro
+    d = pd.concat([pend, d[d["APROVADA"].notna()].sort_values("APROVADA", ascending=False)])    # depois as aprovadas, da mais recente para a mais antiga
+    grade = "grid-template-columns:54px minmax(0,1fr) 70px 82px 88px 48px 130px"
+    topo = (f'<div class="rp-rq rp-qh" style="{grade}"><span style="text-align:left">NF venda</span>'
+            '<span style="text-align:left">Cliente</span><span style="text-align:left">Tratativa</span><span class="rp-pz">Valor</span>'
+            '<span class="rp-pz" title="Saldo em aberto da NF no Contas a Receber (zerado = baixada)">Saldo NF</span><span class="rp-pz">Aprov.</span><span style="text-align:left">Situação</span></div>')
+    linhas, n_pend = "", 0
+    for r in d.itertuples(index=False):
+        pendente = pd.isna(r.APROVADA)
+        n_pend += pendente
+        url = url_controle_venda(r.CONTROLE)            # a NF abre a aba Tratativa e Execução do controle de venda no SyncProcess
+        nf = escape(str(r.NF or "—"))
+        nf_html = (f'<a href="{url}?tab=tratativa-pane#tratativa-pane" target="_blank" rel="noopener noreferrer" '
+                   f'title="Abrir Tratativa e Execução no SyncProcess">{nf}</a>' if url else nf)
+        devolucao = pd.notna(r.TIPO) and int(r.TIPO) == 3
+        tipo = "Devolução" if devolucao else ("Desconto" if pd.notna(r.TIPO) and int(r.TIPO) == 2 else "—")
+        valor = formatar_moeda(float(r.VALOR)) if pd.notna(r.VALOR) else "—"
+        nome = nomes.get(r.COD, f"Cliente {r.COD}")
+        sd = float(saldo.get((str(r.NF or "").strip(), r.COD), 0) or 0) if df_cr is not None else None
+        saldo_html = ("—" if sd is None else f'<span style="color:#6fd69a">{formatar_moeda(0)}</span>' if abs(sd) < 0.005
+                      else f'<span style="color:#f5c070">{formatar_moeda(sd)}</span>')
+        if pendente:
+            dias = max((hoje - pd.Timestamp(r.DEFINIDA).normalize()).days, 0) if pd.notna(r.DEFINIDA) else None
+            cor = "#f3a3a2" if dias is not None and dias >= 7 else "#f5c070"
+            sit = f'<span style="color:{cor}">Pendente há {"—" if dias is None else f"{dias} " + _plural(dias, "dia", "dias")}</span>'
+        else:
+            sit = f'<span style="color:#6fd69a">Aprovada {pd.Timestamp(r.APROVADA):%d/%m %H:%M}</span>'
+        linhas += (f'<div class="rp-rq rp-qr" style="{grade}"><span>{nf_html}</span>'
+                   f'<span class="rp-rcl" title="{escape(nome, quote=True)}">{escape(nome)}</span><span style="color:#d1d5db;font-size:13px">{tipo}</span>'
+                   f'<span class="rp-pz">{valor}</span><span class="rp-pz">{saldo_html}</span><span class="rp-pz">#{int(r.APROVACAO) if pd.notna(r.APROVACAO) else "—"}</span>'
+                   f'<span style="font-size:13px;white-space:nowrap">{sit}</span></div>')
+    cabeca = ('<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+              '<span style="color:#e0e0e0;font-size:14px;font-weight:600">Reclamações · aprovação das tratativas</span>'
+              f'<span style="font-size:11px;color:#8892a4">{int(n_pend)} pendente(s) · {len(d) - int(n_pend)} aprovada(s) nos últimos 30 dias</span></div>')
+    return _CSS_RQ + f'<div class="rp-lista" style="border-top-color:#378ADD;height:100%;box-sizing:border-box">{cabeca}<div style="overflow-x:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e"><div style="min-width:720px">{topo}<div style="max-height:156px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div></div></div></div>'   # largura mínima + rolagem lateral em tela pequena
+
+
+def _prazo_colorido(ts, texto: str) -> str:
+    """Prazo da nota com a cor do texto (sem fundo) pela distância de hoje: vermelho = vencido ou vence hoje, laranja = falta 1 dia, amarelo = 2 a 3 dias;
+    4 dias ou mais fica só a data, sem destaque (o destaque começa com 3 dias). A segunda linha pequena traz a contagem (a cor não é a única pista)."""
+    if pd.isna(ts):
+        return texto
+    d = (pd.Timestamp(ts).normalize() - pd.Timestamp.today().normalize()).days
+    if d > 3:
+        return texto
+    cor, nota = (("#f3a3a2", f"vencido há {-d} {_plural(-d, 'dia', 'dias')}") if d < 0 else
+                 ("#f3a3a2", "vence hoje") if d == 0 else
+                 ("#f5b090", "falta 1 dia") if d == 1 else
+                 ("#f2d25c", f"faltam {d} dias"))
+    return (f'<span style="display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.15;'
+            f'color:{cor};font-weight:600">{texto}<small style="font-size:10px;font-weight:400">{nota}</small></span>')
 
 
 def _grafico_notas(notas, filtro: str, cliente: str | None = None) -> str:
@@ -484,14 +561,16 @@ def _grafico_notas(notas, filtro: str, cliente: str | None = None) -> str:
             ultimo = f'<span class="rp-ua" style="color:#6b7280"{dica_g}>sem anexo</span>'
         linhas += (f'<div class="rp-q rp-qr" style="{grade}">{nf}<span class="rp-cadc">{cad}</span><span class="rp-cli" title="Abrir os controles de venda de {escape(cli, quote=True)} no SyncProcess">'
                    f'<a href="{url_busca_controles(cli)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">{escape(cli)}</a></span>'
-                   f'{celulas}{ultimo}<span class="rp-pz"{dica_em}>{emissao}</span><span class="rp-pz"{dica_pz}>{prazo}</span></div>')
+                   f'{celulas}{ultimo}<span class="rp-pz"{dica_em}>{emissao}</span><span class="rp-pz"{dica_pz}>{_prazo_colorido(r.PRAZO, prazo)}</span></div>')
     legenda = ('<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#8892a4;margin-top:10px">'
                '<span><span style="color:#E24B4A">●</span> inválido</span><span><span style="color:#378ADD">●</span> em validação</span>'
                '<span><span style="color:#9ca3af">●</span> pendente (sem documento)</span><span><span style="color:#22c55e">●</span> válido</span>'
                '<span><span style="border:1.5px solid #E24B4A;border-radius:3px;display:inline-block;width:12px;height:9px;vertical-align:-1px"></span> contorno vermelho = bloqueando (prazo vencido)</span>'
+               '<span>Prazo: <span style="color:#f3a3a2">vencido/hoje</span> · <span style="color:#f5b090">falta 1 dia</span> · <span style="color:#f2d25c">2 a 3 dias</span></span>'
                '<span>— a regra não vale para a nota</span><span>' + _CADEADO_FECHADO + ' crédito bloqueado · ' + _CADEADO_ABERTO + ' crédito liberado</span><span>clique na NF para abrir o controle de venda e no nome do cliente para ver os controles dele no SyncProcess</span></div>')
-    return (f'<div class="rp-lista">{cabeca}{topo}<div style="max-height:420px;overflow-y:auto;scrollbar-width:thin;'
-            f'scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>{legenda}</div>')
+    larg = 70 + 22 + 150 + len(cols) * 104 + 124 + 92 + 92 + 8 * (len(cols) + 6)           # soma das colunas mínimas: abaixo disso o quadro rola de lado em vez de esmagar
+    return (f'<div class="rp-lista">{cabeca}<div style="overflow-x:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e"><div style="min-width:{larg}px">{topo}<div style="max-height:420px;overflow-y:auto;scrollbar-width:thin;'
+            f'scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div></div></div>{legenda}</div>')
 
 
 def _dt_curta(ts) -> str:
@@ -540,7 +619,7 @@ def _excel(notas, desbloquear) -> bytes:
     if desbloquear is None or desbloquear.empty:
         desb = pd.DataFrame(columns=["Cód. Cliente", "Cliente", "Situação do crédito", "Controles abertos", "NFs dos controles"])
     else:
-        desb = pd.DataFrame([{"Cód. Cliente": r.COD, "Cliente": r.NOME, "Situação do crédito": r.SITUACAO.capitalize(),
+        desb = pd.DataFrame([{"Cód. Cliente": r.COD, "Cliente": r.NOME, "Cód. Grupo de Crédito": r.GRUPO, "Situação do crédito": r.SITUACAO.capitalize(),
                               "Controles abertos": len(r.CONTROLES), "NFs dos controles": ", ".join(nf for _, nf in r.CONTROLES if nf)}
                              for r in desbloquear.itertuples(index=False)])
     return exportar_excel_abas_recebimentos([
@@ -563,7 +642,7 @@ def _pre_carregar() -> None:
     hoje = datetime.date.today()
     tarefas = [(carregar_notas_pendentes_validacao, ()), (carregar_controles_abertos_mi, ()), (carregar_grupo_credito_geral, ()),
                (carregar_grupo_credito_saldo_agente, ()), (carregar_lista_clientes, ()), (carregar_recebido_periodo_mi, (hoje, hoje)),
-               (carregar_recebimento_hoje_mi, ()), (carregar_pedidos_em_validacao, ())]
+               (carregar_recebimento_hoje_mi, ()), (carregar_pedidos_em_validacao, ()), (carregar_tratativas_pendentes, ())]
 
     def rodar(f, args):
         if ctx is not None and add_script_run_ctx is not None:
@@ -707,6 +786,21 @@ def render(df_cr: pd.DataFrame) -> None:
         st.info("Não foi possível consultar as notas pendentes de validação agora.")
         return
     desbloquear = _para_desbloquear(notas)
+    # Para desbloquear e Reclamações ficam lado a lado, ACIMA do quadro de notas (sempre à vista, sem depender das abas nem do filtro de cliente);
+    # em tela estreita o Streamlit empilha
+    html_recl = _html_reclamacoes_pendentes(carregar_tratativas_pendentes(), None, _nomes_clientes(), df_cr)
+    if html_recl:
+        with st.container(key="rp_par"):                     # os dois cards com a mesma altura (a coluna e o html esticam até o card mais alto)
+            st.html("<style>.st-key-rp_par [data-testid='stHorizontalBlock']{align-items:stretch}"
+                    ".st-key-rp_par [data-testid='stColumn']>div,.st-key-rp_par [data-testid='stColumn'] [data-testid='stElementContainer'],"
+                    ".st-key-rp_par [data-testid='stColumn'] [data-testid='stHtml'],.st-key-rp_par [data-testid='stColumn'] [data-testid='stHtml']>div{height:100%}"
+                    "@media (max-width:1400px){.st-key-rp_par [data-testid='stHorizontalBlock']{flex-wrap:wrap}"
+                    ".st-key-rp_par [data-testid='stColumn']{min-width:100% !important}}</style>")   # tela pequena: um card embaixo do outro
+            c_desb, c_recl = st.columns([4, 6], gap="small")
+            c_desb.html(_CSS + _CSS_RQ + _html_para_desbloquear(desbloquear))
+            c_recl.html(_CSS + html_recl)
+    else:
+        st.html(_CSS + _CSS_RQ + _html_para_desbloquear(desbloquear))
     n_vm = int(notas["TIPO"].isin(["MANUAL", "PEDIDO"]).sum())
     c_filtro, c_busca = st.columns([1.6, 1], vertical_alignment="center")      # filtro e busca de cliente na mesma linha
     with c_filtro:
@@ -734,4 +828,3 @@ def render(df_cr: pd.DataFrame) -> None:
         botao_exportar_excel(lambda: _excel(notas, desbloquear), f"Resumo_Pendencias_{datetime.date.today():%Y%m%d}.xlsx",
                              key="rp_excel", use_container_width=True, label="Excel",
                              help="Duas abas: Notas pendentes e Para desbloquear")
-    st.html(_CSS + _html_para_desbloquear(desbloquear))     # card fixo abaixo do quadro, sem botão

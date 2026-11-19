@@ -231,6 +231,29 @@ def carregar_pedidos_em_validacao():
 
 
 @st.cache_data(show_spinner=False)
+def carregar_tratativas_pendentes():
+    """Tratativas de reclamação (devolução/desconto) aguardando aprovação (COD_CLIENTE, CONTROLE, NF, TIPO, NF_DEVOLUCAO, VALOR, APROVACAO,
+    DEFINIDA, RECLAMACAO, TRATATIVA), inventadas."""
+    hoje = pd.Timestamp(date.today())
+    d = pd.Timedelta
+    df = pd.DataFrame([
+        {"COD_CLIENTE": 1001, "CONTROLE": "CTV-2026-000762", "NF": "48001", "TIPO": 3, "NF_DEVOLUCAO": "159055", "VALOR": 9900.0,
+         "APROVACAO": 681, "DEFINIDA": hoje - d(days=21), "APROVADA": pd.NaT, "RECLAMACAO": 221, "TRATATIVA": 161},
+        {"COD_CLIENTE": 1001, "CONTROLE": "CTV-2026-003322", "NF": "48007", "TIPO": 2, "NF_DEVOLUCAO": None, "VALOR": 7238.0,
+         "APROVACAO": 861, "DEFINIDA": hoje - d(days=2), "APROVADA": pd.NaT, "RECLAMACAO": 243, "TRATATIVA": 201},
+        {"COD_CLIENTE": 1104, "CONTROLE": "CTV-2026-003324", "NF": "60348", "TIPO": 3, "NF_DEVOLUCAO": "56263", "VALOR": 5400.0,
+         "APROVACAO": 821, "DEFINIDA": hoje - d(days=6), "APROVADA": hoje - d(days=2), "RECLAMACAO": 261, "TRATATIVA": 181},
+        {"COD_CLIENTE": 1103, "CONTROLE": "CTV-2026-002266", "NF": "59147", "TIPO": 2, "NF_DEVOLUCAO": None, "VALOR": 5830.0,
+         "APROVACAO": 613, "DEFINIDA": hoje - d(days=12), "APROVADA": hoje - d(days=9), "RECLAMACAO": 202, "TRATATIVA": 123},
+        {"COD_CLIENTE": 1104, "CONTROLE": "CTV-2026-002084", "NF": "58849", "TIPO": 2, "NF_DEVOLUCAO": None, "VALOR": 4730.0,
+         "APROVACAO": 661, "DEFINIDA": hoje - d(days=20), "APROVADA": hoje - d(days=18), "RECLAMACAO": 181, "TRATATIVA": 141},
+        {"COD_CLIENTE": 1103, "CONTROLE": "CTV-2026-001821", "NF": "58611", "TIPO": 2, "NF_DEVOLUCAO": None, "VALOR": 648.0,
+         "APROVACAO": 581, "DEFINIDA": hoje - d(days=25), "APROVADA": hoje - d(days=24), "RECLAMACAO": 182, "TRATATIVA": 101}])
+    df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
+    return df
+
+
+@st.cache_data(show_spinner=False)
 def carregar_pendencias_bloqueantes():
     """Notas com pendência por cliente (COD_CLIENTE, QTD_BLOQUEANTES, PRAZO_BLOQUEIO, QTD_MANUAL, PRAZO_MANUAL), calculadas das
     mesmas notas fictícias do gráfico, para o card e o gráfico sempre baterem."""
@@ -392,8 +415,10 @@ _COLUNAS_ERRO = ["ORGANIZACAO", "COD_FILIAL", "NOME_FILIAL", "SEGMENTO", "CATEGO
 
 
 @st.cache_data(show_spinner=False)
-def carregar_aps_erro() -> pd.DataFrame:
+def carregar_aps_erro(data_inicio: str, data_fim: str) -> pd.DataFrame:
     e = _extra()["erros"].copy()
+    ini, fim = pd.to_datetime(data_inicio, format="%d/%m/%Y"), pd.to_datetime(data_fim, format="%d/%m/%Y")
+    e = e[(pd.to_datetime(e["DATA"]) >= ini) & (pd.to_datetime(e["DATA"]) <= fim)].reset_index(drop=True)
     rng = np.random.RandomState(nv.SEMENTE + 31)
     e = e.rename(columns={"ORGANIZAÇÃO": "ORGANIZACAO", "CÓD_FILIAL": "COD_FILIAL"})
     e["ORGANIZACAO"] = 6
