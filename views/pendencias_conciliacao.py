@@ -66,6 +66,9 @@ def render(carregar, carregar_organizacoes, carregar_contas) -> None:
         if isinstance(periodo, (tuple, list)) and len(periodo) == 2:
             st.session_state["_pc_periodo"] = (periodo[0], periodo[1])
             st.session_state["_pc_org"] = [int(c) for c in org_sel]
+            # Gerar Relatório sempre refaz tudo: consulta ao banco, PDF e imagem (o Excel já nasce do que está na tela), sem reaproveitar o que ficou em cache
+            for _f in (carregar, _gerar_pdf_cached, _gerar_imagem_cached):
+                getattr(_f, "clear", lambda: None)()
         else:
             st.session_state.pop("_pc_periodo", None)
             st.session_state.pop("_pc_org", None)
@@ -147,7 +150,7 @@ def render(carregar, carregar_organizacoes, carregar_contas) -> None:
         "Tipo Docto": d["TIPO_DOCTO"], "Histórico": d["HISTORICO"], "Valor": d["VALOR"], "Natureza": d["NATUREZA"],
         "Importação": d["DATA_IMPORTACAO"].map(_fmt_importacao)})
     sufixo = (nome_org.split()[0].title() if len(orgs_ger) == 1 else "Todas" if not orgs_ger else "Varias") + "_"
-    base_nome = f"Pendencias_Conciliacao_{sufixo}{datetime.date.today():%d%m%Y}"       # dia, mês e ano (23112026)
+    base_nome = f"Pendencias_Conciliacao_{sufixo}{datetime.date.today():%d-%m-%Y}"       # dia-mês-ano (Pendencias_Conciliacao_Wantel_23-11-2026)
     titulo_img = f"Pendências de Conciliação — {nome_org} — {dt_ini:%d/%m/%Y} a {dt_fim:%d/%m/%Y}"
     imagem_bytes = _gerar_imagem_cached(d, titulo=titulo_img)
     pdf_bytes = _gerar_pdf_cached(d, dt_ini, dt_fim)

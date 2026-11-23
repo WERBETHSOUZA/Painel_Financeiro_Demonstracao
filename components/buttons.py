@@ -7,6 +7,7 @@ novo, use botao_exportar_excel() em vez de um st.download_button avulso.
 """
 
 import base64
+import json
 from collections.abc import Callable
 
 import streamlit as st
@@ -89,13 +90,32 @@ def botao_abrir_em_aba(
     label: str,
     key: str,
     icone: str = "pdf",
+    file_name: str | None = None,
 ) -> None:
-    """Botão que ABRE o arquivo (PDF ou imagem) numa aba nova do navegador, em vez de baixar a cada clique: a aba mostra o arquivo e de lá se baixa, se quiser.
-    O arquivo já vai pronto dentro do botão (por isso gere-o em cache) e a aba nasce no clique, sem bloqueio de pop-up. Se o navegador bloquear a aba nova,
-    o botão baixa o arquivo como plano B. Mesmo visual do botão Copiar."""
+    """Botão que ABRE o arquivo (PDF ou imagem) numa aba nova do navegador, em vez de baixar a cada clique: a aba é uma página nossa, com o arquivo dentro,
+    o título e os botões Baixar e Imprimir. Quem baixa dali recebe `file_name` (abrir o PDF direto pelo endereço temporário do navegador salvaria com um código,
+    tipo e4dd6d13-....pdf). O arquivo já vai pronto dentro do botão (por isso gere-o em cache) e a aba nasce no clique, sem bloqueio de pop-up. Se o navegador
+    bloquear a aba nova, o botão baixa o arquivo como plano B. Mesmo visual do botão nativo."""
     b64 = base64.b64encode(data).decode("ascii")
     key = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in str(key))        # a chave vira nome de variável JavaScript
     ext = "pdf" if mime == "application/pdf" else "png"
+    nome = file_name or f"{label.replace(' ', '_')}.{ext}"
+    nome = "".join(ch if ch.isalnum() or ch in "-_. " else "_" for ch in nome)             # nome seguro para colar no HTML da aba
+    barra = ('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>__NOME__</title><style>'
+             'html,body{margin:0;height:100%;background:#0f1117;font-family:"Segoe UI",Arial,sans-serif}'
+             '.bar{height:44px;display:flex;align-items:center;gap:10px;padding:0 14px;background:#14171f;color:#e0e0e0;font-size:13px;'
+             'border-bottom:1px solid #2a3350;box-sizing:border-box}.bar span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+             '.bar a,.bar button{color:#e0e0e0;background:#1a1d27;border:1px solid #3a4160;border-radius:7px;padding:6px 14px;font-size:13px;'
+             'text-decoration:none;cursor:pointer;font-family:inherit}.bar a:hover,.bar button:hover{border-color:#1E88E5;color:#1E88E5}'
+             'iframe{width:100%;height:calc(100% - 44px);border:0;background:#fff;display:block}'
+             '.img{height:calc(100% - 44px);overflow:auto;background:#fff;text-align:center}.img img{max-width:100%;height:auto}'
+             '</style></head><body><div class="bar"><span>__NOME__</span><a href="__URL__" download="__NOME__">Baixar</a>')
+    if mime == "application/pdf":
+        pagina = (barra + "<button onclick=\"var f=document.getElementById('v').contentWindow;f.focus();f.print()\">Imprimir</button></div>"
+                  '<iframe id="v" src="__URL__#toolbar=0&navpanes=0&view=FitH"></iframe></body></html>')
+    else:
+        pagina = barra + '<button onclick="window.print()">Imprimir</button></div><div class="img"><img src="__URL__" alt="__NOME__"></div></body></html>'
+    pagina = pagina.replace("__NOME__", nome)
     svg = {
         "pdf": '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path><path d="M9 13h6M9 17h4"></path>',
         "imagem": '<rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path>',
@@ -126,6 +146,8 @@ def botao_abrir_em_aba(
             // empresta a fonte do Streamlit (o quadro é isolado e não a carrega sozinho)
             try {{ window.parent.document.fonts.forEach(function(f) {{ document.fonts.add(f); }}); }} catch (e) {{}}
             var B64_{key} = '{b64}';
+            var PAGINA_{key} = {json.dumps(pagina)};
+            var NOME_{key} = {json.dumps(nome)};
             function blob_{key}() {{
                 var bin = atob(B64_{key}), arr = new Uint8Array(bin.length);
                 for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
@@ -134,11 +156,12 @@ def botao_abrir_em_aba(
             document.getElementById('btn_{key}').addEventListener('click', function() {{
                 var msg = document.getElementById('msg_{key}');
                 var url = URL.createObjectURL(blob_{key}());
-                var aba = window.open(url, '_blank');
+                var pag = URL.createObjectURL(new Blob([PAGINA_{key}.split('__URL__').join(url)], {{ type: 'text/html' }}));
+                var aba = window.open(pag, '_blank');
                 if (aba) {{
                     msg.style.color = '#22c55e'; msg.innerText = 'Aberto em nova aba';
                 }} else {{
-                    var a = document.createElement('a'); a.href = url; a.download = '{label.replace(" ", "_")}.{ext}'; document.body.appendChild(a); a.click(); a.remove();
+                    var a = document.createElement('a'); a.href = url; a.download = NOME_{key}; document.body.appendChild(a); a.click(); a.remove();
                     msg.style.color = '#f5c070'; msg.innerText = 'Pop-up bloqueado: baixei o arquivo';
                 }}
                 setTimeout(function() {{ msg.innerText = ''; }}, 3500);
@@ -188,11 +211,11 @@ def botoes_acao_row(
         idx += 1
     if imagem is not None:
         with cols[idx]:
-            botao_abrir_em_aba(imagem["data"], "image/png", "Gerar Imagem", key=imagem["key"], icone="imagem")
+            botao_abrir_em_aba(imagem["data"], "image/png", "Gerar Imagem", key=imagem["key"], icone="imagem", file_name=imagem.get("file_name"))
         idx += 1
     if pdf is not None:
         with cols[idx]:
-            botao_abrir_em_aba(pdf["data"], "application/pdf", "Gerar PDF", key=pdf["key"], icone="pdf")
+            botao_abrir_em_aba(pdf["data"], "application/pdf", "Gerar PDF", key=pdf["key"], icone="pdf", file_name=pdf.get("file_name"))
         idx += 1
     if copiar is not None:
         from utils.imagem_email import render_botao_copiar_imagem

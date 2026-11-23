@@ -317,7 +317,8 @@ def render(df_geral: pd.DataFrame, df_total_agente: pd.DataFrame) -> None:
     with col2:
         # a imagem é gerada no primeiro clique (leva alguns segundos); depois dele o botão abre a imagem numa aba nova do navegador
         if _img_pronta:
-            botao_abrir_em_aba(_img_cache["img"], "image/png", "Gerar Imagem", key="adto_export_imagem", icone="imagem")
+            botao_abrir_em_aba(_img_cache["img"], "image/png", "Gerar Imagem", key="adto_export_imagem", icone="imagem",
+                               file_name=f"Adiantamentos_{situacao_sel}.png")
         else:
             if st.button("Gerar Imagem", key="adto_btn_salvar",
                          use_container_width=True, icon=":material/image:"):
