@@ -21,7 +21,7 @@ from datetime import date
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from components.buttons import botao_exportar_excel, botao_salvar_imagem
+from components.buttons import botao_abrir_em_aba, botao_exportar_excel
 from components.cards import card_indicador, render_tabela_html
 from utils.exporters import exportar_excel
 from utils.imagem_email import gerar_imagem_resumo_titulos, render_botao_copiar_imagem
@@ -303,7 +303,7 @@ def render(df_geral: pd.DataFrame, df_total_agente: pd.DataFrame) -> None:
         return _img
 
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-    col1, col2, col3, _ = st.columns([1, 1, 1, 3], gap="small")
+    col1, col2, _ = st.columns([1, 1, 4], gap="small")
     with col1:
         arquivo_excel = exportar_excel(df_excel, "ADIANTAMENTOS")
         botao_exportar_excel(
@@ -315,24 +315,12 @@ def render(df_geral: pd.DataFrame, df_total_agente: pd.DataFrame) -> None:
         )
 
     with col2:
+        # a imagem é gerada no primeiro clique (leva alguns segundos); depois dele o botão abre a imagem numa aba nova do navegador
         if _img_pronta:
-            botao_salvar_imagem(
-                _img_cache["img"],
-                f"Adiantamentos_{situacao_sel}.png",
-                key="adto_export_imagem",
-            )
+            botao_abrir_em_aba(_img_cache["img"], "image/png", "Gerar Imagem", key="adto_export_imagem", icone="imagem")
         else:
-            if st.button("Salvar Imagem", key="adto_btn_salvar",
+            if st.button("Gerar Imagem", key="adto_btn_salvar",
                          use_container_width=True, icon=":material/image:"):
-                _gerar_e_cachear()
-                st.rerun()
-
-    with col3:
-        if _img_pronta:
-            render_botao_copiar_imagem(_img_cache["img"], key="adto_copiar")
-        else:
-            if st.button("Copiar Imagem", key="adto_btn_copiar",
-                         use_container_width=True, icon=":material/content_copy:"):
                 _gerar_e_cachear()
                 st.rerun()
 

@@ -422,6 +422,14 @@ def carregar_organizacoes_conciliacao() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def carregar_contas_conciliacao() -> pd.DataFrame:
+    """Contas por organização do filtro Conta da tela Pendências de Conciliação (COD_ORG, COD_BANCO, CONTA), inventadas."""
+    linhas = [(6, 101, "BANCO ALFA - AG 0001 CC 12345-6"), (6, 102, "BANCO BETA - AG 0002 CC 23456-7"), (6, 103, "BANCO GAMA - AG 0003 CC 34567-8"),
+              (25, 201, "BANCO ALFA - AG 0001 CC 45678-9"), (25, 202, "BANCO DELTA - AG 0004 CC 56789-0"), (42500, 301, "BANCO BETA - AG 0002 CC 67890-1")]
+    return pd.DataFrame(linhas, columns=["COD_ORG", "COD_BANCO", "CONTA"])
+
+
+@st.cache_data(show_spinner=False)
 def carregar_pendencias_conciliacao(data_inicio: str, data_fim: str) -> pd.DataFrame:
     """Lançamentos do extrato ainda não conciliados (COD_ORG, ORGANIZACAO, COD_FILIAL, FILIAL, COD_BANCO, CONTA, DATA, DOCTO_BANCO, TIPO_DOCTO, HISTORICO,
     VALOR, NATUREZA, DATA_IMPORTACAO), inventados, só do período escolhido (datas DD/MM/AAAA)."""

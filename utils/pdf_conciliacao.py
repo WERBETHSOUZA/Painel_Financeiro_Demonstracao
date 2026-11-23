@@ -1,5 +1,5 @@
 """PDF das Pendências de Conciliação (A4 retrato): resumo por empresa (só quando há mais de uma), e, por empresa, os cards, o resumo por banco e o
-detalhe de cada banco (Data, Docto Banco, Tipo Docto, Histórico, Valor, Natureza, Importação). Recebe o DataFrame da consulta
+detalhe de cada banco (Data, Docto Banco, Tipo Docto, Histórico, Valor, Natureza). Recebe o DataFrame da consulta
 QUERY_PENDENCIAS_CONCILIACAO.sql (colunas em maiúsculas) já filtrado pela tela."""
 import datetime
 import re
@@ -133,18 +133,16 @@ def _bloco_banco(conta: str, d: pd.DataFrame) -> list:
                    Paragraph(f"{len(d)} lançamento(s) pendente(s)", _ps("bs", 7.5, color=_MU, align=TA_RIGHT))]], colWidths=[_L * 0.75, _L * 0.25])
     topo.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, 0), 0.8, _NV2), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
     rows = [[Paragraph("Data", _H), Paragraph("Docto<br/>Banco", _H), Paragraph("Tipo<br/>Docto", _H), Paragraph("Histórico", _H), Paragraph("Valor", _HR),
-             Paragraph("Natureza", _H), Paragraph("Importação", _H)]]
+             Paragraph("Natureza", _H)]]
     nat_c, nat_d = _ps("nc", 7.5, color=_VD), _ps("nd", 7.5, color=_VM)
-    manual = _ps("im", 7, True, _AM)
     for x in d.to_dict("records"):
-        imp = Paragraph("Importação Manual", manual) if pd.isna(x["DATA_IMPORTACAO"]) else Paragraph(f"{pd.Timestamp(x['DATA_IMPORTACAO']):%d/%m/%Y %H:%M}", _C0)
         rows.append([Paragraph(f"{pd.Timestamp(x['DATA']):%d/%m/%Y}", _C0), Paragraph(escape(str(x["DOCTO_BANCO"] or "")), _C0),
                      Paragraph(escape(str(x["TIPO_DOCTO"] or "")), _C0), Paragraph(escape(str(x["HISTORICO"] or "")), _C0), Paragraph(_br(x["VALOR"]), _C1),
-                     Paragraph(x["NATUREZA"], nat_c if x["NATUREZA"] == "Crédito" else nat_d), imp])
+                     Paragraph(x["NATUREZA"], nat_c if x["NATUREZA"] == "Crédito" else nat_d)])
     tc, td = d.loc[d["NATUREZA"] == "Crédito", "VALOR"].sum(), d.loc[d["NATUREZA"] != "Crédito", "VALOR"].sum()
     resumo = " · ".join(p for p in ((f"Débitos: {_br(td)}" if td else ""), (f"Créditos: {_br(tc)}" if tc else "")) if p)
-    rows.append([Paragraph("Total do banco", _C2), "", "", Paragraph(resumo, _ps("rs", 7.5, True)), "", "", ""])
-    t = Table(rows, colWidths=[_L * 0.10, _L * 0.10, _L * 0.10, _L * 0.30, _L * 0.12, _L * 0.09, _L * 0.19], repeatRows=1)
+    rows.append([Paragraph("Total do banco", _C2), "", "", Paragraph(resumo, _ps("rs", 7.5, True)), "", ""])
+    t = Table(rows, colWidths=[_L * 0.11, _L * 0.11, _L * 0.11, _L * 0.38, _L * 0.16, _L * 0.13], repeatRows=1)
     t.setStyle(TableStyle(_estilo_tabela(len(rows)) + [("SPAN", (0, -1), (2, -1)), ("SPAN", (3, -1), (-1, -1))]))
     bloco = [Spacer(1, 0.5 * cm), topo, t]
     return [KeepTogether(bloco)] if len(rows) <= 14 else bloco       # banco curto não é cortado entre páginas; o longo continua com o cabeçalho repetido

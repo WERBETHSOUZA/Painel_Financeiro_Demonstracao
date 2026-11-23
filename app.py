@@ -11,7 +11,7 @@ from services.auth_service import authenticate_user, sanitize_username
 from services import permissoes
 from utils import atualizacao
 from services.data_service import (
-    carregar_aps_erro, carregar_pendencias_conciliacao, carregar_organizacoes_conciliacao,
+    carregar_aps_erro, carregar_pendencias_conciliacao, carregar_organizacoes_conciliacao, carregar_contas_conciliacao,
     carregar_relatorio_approvo, carregar_contas_receber, carregar_total_faturado_cliente,
     carregar_faturado_mensal_cliente, carregar_faturado_mensal_mi,
     carregar_contas_apagar, carregar_boletos_dda, DATA_CORTE_CONTAS_APAGAR, atualizar_se_antigo,
@@ -874,8 +874,8 @@ with st.sidebar:
             st.session_state.pop(chave_rfm, None)
         for chave_inc in ["_inc_periodo", "inc_periodo", "inc_filtro_sol"]:     # Inconsistências abre de novo no mês vigente, sem relatório gerado
             st.session_state.pop(chave_inc, None)
-        for chave_pc in ["_pc_periodo", "pc_periodo", "_pc_org", "pc_org", "pc_conta", "pc_nat"]:       # Pendências de Conciliação abre no mês vigente, sem relatório gerado
-            st.session_state.pop(chave_pc, None)
+        for chave_pc in ["_pc_periodo", "pc_periodo", "_pc_org", "pc_org", "pc_nat"] + [k for k in list(st.session_state) if str(k).startswith("pc_conta")]:
+            st.session_state.pop(chave_pc, None)       # Pendências de Conciliação abre no mês vigente, sem relatório gerado
         for chave_rcmi in ["_rcmi_periodo", "rcmi_vencimento", "rcmi_status", "rcmi_grupo"]:
             st.session_state.pop(chave_rcmi, None)
         for chave in ["vencidas", "inconsistencias", "filtro_padrao",
@@ -1128,7 +1128,7 @@ with st.container():
         resumo_pendencias.render(df_cr_rp)
 
     elif painel_atual == "Tesouraria > Pendências de Conciliação":
-        pendencias_conciliacao.render(carregar_pendencias_conciliacao, carregar_organizacoes_conciliacao)       # o período é escolhido na tela e só ele vai ao banco
+        pendencias_conciliacao.render(carregar_pendencias_conciliacao, carregar_organizacoes_conciliacao, carregar_contas_conciliacao)       # o período é escolhido na tela e só ele vai ao banco
 
     elif painel_atual == "Tesouraria > Recebimento por Banco":
         relatorio_recebimentos.render()
