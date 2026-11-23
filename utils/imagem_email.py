@@ -1395,17 +1395,17 @@ def gerar_imagem_pendencias_conciliacao(df: pd.DataFrame, titulo: str = "Pendên
 
     draw.text((MARGEM, y), "Resumo por banco", font=f_th, fill=_COR_TEXTO)
     y += 22
-    lin = [[r.EMPRESA, r.CONTA, str(int(r.Q)), fmt(r.C) if r.C else "-", fmt(r.D) if r.D else "-", str(int(r.M)), f"{pd.Timestamp(r.A):%d/%m/%Y}"]
+    lin = [[r.EMPRESA, str(int(r.COD_BANCO)), r.CONTA, str(int(r.Q)), fmt(r.C) if r.C else "-", fmt(r.D) if r.D else "-", str(int(r.M)), f"{pd.Timestamp(r.A):%d/%m/%Y}"]
            for r in resumo.itertuples(index=False)]
-    y = tabela(y, ["Empresa", "Banco", "Pend.", "Créditos", "Débitos", "Imp. manual", "Mais antigo"], [1.6, 3.4, 0.7, 1.3, 1.3, 1.0, 1.1], lin, alinha_dir=(2, 3, 4, 5, 6))
+    y = tabela(y, ["Empresa", "Cód.", "Banco", "Pend.", "Créditos", "Débitos", "Imp. manual", "Mais antigo"], [1.6, 0.6, 3.1, 0.7, 1.3, 1.3, 1.0, 1.1], lin, alinha_dir=(3, 4, 5, 6, 7))
     y += 24
     draw.text((MARGEM, y), "Lançamentos pendentes" if mostra_detalhe else f"Lançamentos pendentes: {len(d)} (detalhe no Excel e no PDF)", font=f_th, fill=_COR_TEXTO)
     y += 22
     if mostra_detalhe:
-        lin = [[f"{pd.Timestamp(r.DATA):%d/%m/%Y}", _valor_celula(r.CONTA), _valor_celula(r.DOCTO_BANCO), _valor_celula(r.TIPO_DOCTO), _valor_celula(r.HISTORICO), fmt(r.VALOR),
+        lin = [[f"{pd.Timestamp(r.DATA):%d/%m/%Y}", str(int(r.COD_BANCO)), _valor_celula(r.CONTA), _valor_celula(r.DOCTO_BANCO), _valor_celula(r.TIPO_DOCTO), _valor_celula(r.HISTORICO), fmt(r.VALOR),
                 r.NATUREZA, "Importação Manual" if pd.isna(r.DATA_IMPORTACAO) else f"{pd.Timestamp(r.DATA_IMPORTACAO):%d/%m/%Y %H:%M}"] for r in det.itertuples(index=False)]
-        cores = [[None, None, None, None, None, None, _COR_OK_TEXTO if r[6] == "Crédito" else _COR_VENCIDO, (183, 96, 14) if r[7] == "Importação Manual" else None] for r in lin]
-        tabela(y, ["Data", "Banco", "Docto Banco", "Tipo Docto", "Histórico", "Valor", "Natureza", "Importação"], [0.9, 2.6, 0.8, 0.8, 2.2, 1.1, 0.8, 1.3], lin, alinha_dir=(5,), cores=cores)
+        cores = [[None, None, None, None, None, None, None, _COR_OK_TEXTO if r[7] == "Crédito" else _COR_VENCIDO, (183, 96, 14) if r[8] == "Importação Manual" else None] for r in lin]
+        tabela(y, ["Data", "Cód.", "Banco", "Docto Banco", "Tipo Docto", "Histórico", "Valor", "Natureza", "Importação"], [0.9, 0.6, 2.4, 0.8, 0.8, 2.0, 1.1, 0.8, 1.3], lin, alinha_dir=(6,), cores=cores)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")

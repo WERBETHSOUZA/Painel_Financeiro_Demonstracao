@@ -126,7 +126,7 @@ def render(carregar, carregar_organizacoes) -> None:
     nat_html = d["NATUREZA"].map(lambda n: f'<span style="color:{"#6fd69a" if n == "Crédito" else "#f3a3a2"}">{n}</span>')
     imp_html = d["DATA_IMPORTACAO"].map(lambda v: f'<span style="color:#f5c070;font-weight:600">{_MANUAL}</span>' if pd.isna(v) else _fmt_importacao(v))
     tela = pd.DataFrame({
-        "Banco": d["CONTA"], "Data": d["DATA"].dt.strftime("%d/%m/%Y"), "Docto Banco": d["DOCTO_BANCO"].fillna(""),
+        "Cód.": d["COD_BANCO"].astype(int), "Banco": d["CONTA"], "Data": d["DATA"].dt.strftime("%d/%m/%Y"), "Docto Banco": d["DOCTO_BANCO"].fillna(""),
         "Tipo Docto": d["TIPO_DOCTO"].fillna(""), "Histórico": d["HISTORICO"].fillna(""), "Valor": d["VALOR"].map(formatar_moeda),
         "Natureza": nat_html, "Importação": imp_html})
     render_tabela_html(tela, colunas_moeda=["Valor"], altura=480)

@@ -106,14 +106,23 @@ def _agrupar(d: pd.DataFrame, chaves: list) -> pd.DataFrame:
              .sort_values("QTD", ascending=False))
 
 
-def _tabela_resumo(g: pd.DataFrame, coluna: str, rotulo: str) -> Table:
-    lin = [[Paragraph(rotulo, _H), Paragraph("Pend.", _HR), Paragraph("Créditos", _HR), Paragraph("Débitos", _HR), Paragraph("Man.", _HR), Paragraph("Mais antigo", _H)]]
+def _com_rotulo_banco(g: pd.DataFrame) -> pd.DataFrame:
+    """Coluna BANCO = "código - nome da conta" (o código vem antes do nome no resumo e no título de cada bloco)."""
+    return g.assign(BANCO=g["COD_BANCO"].map(lambda c: f"{int(c)}") + " - " + g["CONTA"].astype(str))
+
+
+def _tabela_resumo(g: pd.DataFrame, coluna: str, rotulo: str, col_cod: str | None = None) -> Table:
+    """Resumo (empresa ou banco); com `col_cod` ganha uma coluna "Cód." antes do nome."""
+    cab = [Paragraph(rotulo, _H), Paragraph("Pend.", _HR), Paragraph("Créditos", _HR), Paragraph("Débitos", _HR), Paragraph("Man.", _HR), Paragraph("Mais antigo", _H)]
+    lin = [([Paragraph("Cód.", _H)] if col_cod else []) + cab]
     for r in g.to_dict("records"):
-        lin.append([Paragraph(escape(str(r[coluna])), _C0), Paragraph(str(r["QTD"]), _C1), Paragraph(_br(r["CRED"]) if r["CRED"] else "—", _C1),
-                    Paragraph(_br(r["DEB"]) if r["DEB"] else "—", _C1), Paragraph(str(int(r["MAN"])), _C1), Paragraph(f"{pd.Timestamp(r['ANT']):%d/%m/%Y}", _C0)])
-    lin.append([Paragraph("Total", _C2), Paragraph(str(int(g["QTD"].sum())), _C2R), Paragraph(_br(g["CRED"].sum()), _C2R), Paragraph(_br(g["DEB"].sum()), _C2R),
-                Paragraph(str(int(g["MAN"].sum())), _C2R), Paragraph(f"{pd.Timestamp(g['ANT'].min()):%d/%m/%Y}", _C2)])
-    t = Table(lin, colWidths=[_L * 0.40, _L * 0.07, _L * 0.14, _L * 0.16, _L * 0.07, _L * 0.16], repeatRows=1)
+        lin.append(([Paragraph(str(int(r[col_cod])), _C0)] if col_cod else []) + [Paragraph(escape(str(r[coluna])), _C0), Paragraph(str(r["QTD"]), _C1),
+                    Paragraph(_br(r["CRED"]) if r["CRED"] else "—", _C1), Paragraph(_br(r["DEB"]) if r["DEB"] else "—", _C1), Paragraph(str(int(r["MAN"])), _C1),
+                    Paragraph(f"{pd.Timestamp(r['ANT']):%d/%m/%Y}", _C0)])
+    lin.append(([Paragraph("", _C2)] if col_cod else []) + [Paragraph("Total", _C2), Paragraph(str(int(g["QTD"].sum())), _C2R), Paragraph(_br(g["CRED"].sum()), _C2R),
+                Paragraph(_br(g["DEB"].sum()), _C2R), Paragraph(str(int(g["MAN"].sum())), _C2R), Paragraph(f"{pd.Timestamp(g['ANT'].min()):%d/%m/%Y}", _C2)])
+    larg = [0.07, 0.34, 0.07, 0.13, 0.15, 0.07, 0.17] if col_cod else [0.40, 0.07, 0.14, 0.16, 0.07, 0.16]
+    t = Table(lin, colWidths=[_L * x for x in larg], repeatRows=1)
     t.setStyle(TableStyle(_estilo_tabela(len(lin))))
     return t
 
@@ -161,9 +170,9 @@ def gerar_pdf(df: pd.DataFrame, dt_ini: datetime.date, dt_fim: datetime.date) ->
         n_bancos = e["COD_BANCO"].nunique()
         el += [_cabecalho(emp, "Pendências de conciliação por banco", dt_ini, dt_fim), Spacer(1, 0.45 * cm),
                _cards(e, f"em {n_bancos} banco(s)"), Spacer(1, 0.45 * cm), Paragraph("Resumo por banco", _ps("h", 10, True, _NV2)), Spacer(1, 0.15 * cm),
-               _tabela_resumo(_agrupar(e, ["COD_BANCO", "CONTA"]), "CONTA", "Banco")]
-        ordem = _agrupar(e, ["COD_BANCO", "CONTA"])
+               _tabela_resumo(_agrupar(e, ["COD_BANCO", "CONTA"]), "CONTA", "Banco", col_cod="COD_BANCO")]
+        ordem = _com_rotulo_banco(_agrupar(e, ["COD_BANCO", "CONTA"]))
         for r in ordem.to_dict("records"):
-            el += _bloco_banco(r["CONTA"], e[e["COD_BANCO"] == r["COD_BANCO"]])
+            el += _bloco_banco(r["BANCO"], e[e["COD_BANCO"] == r["COD_BANCO"]])
     doc.build(el, canvasmaker=_Numerado)
     return buf.getvalue()
