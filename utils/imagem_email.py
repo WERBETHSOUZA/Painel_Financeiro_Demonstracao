@@ -1326,6 +1326,92 @@ def gerar_imagem_inconsistencias(
     return buf.getvalue()
 
 
+def gerar_imagem_pendencias_conciliacao(df: pd.DataFrame, titulo: str = "Pendências de Conciliação", max_detalhe: int = 40) -> bytes:
+    """PNG (fundo branco) das pendências de conciliação: 3 cards (lançamentos, débitos, créditos), resumo por banco e, quando são poucos
+    (até `max_detalhe` lançamentos), o detalhe; com mais que isso a imagem avisa que o detalhe está no Excel e no PDF."""
+    from utils.pdf_conciliacao import nome_empresa
+
+    d = df.copy()
+    d["EMPRESA"] = d["ORGANIZACAO"].map(nome_empresa)
+    cred = d["NATUREZA"].eq("Crédito")
+    fmt = lambda v: f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    LARGURA, MARGEM = 1300, 24
+    largura_util = LARGURA - 2 * MARGEM
+    _f = _FATOR_QUALIDADE
+    f_tit, f_sub, f_th, f_td = _carregar_fonte(18, negrito=True), _carregar_fonte(11), _carregar_fonte(11, negrito=True), _carregar_fonte(11)
+    f_card, f_num = _carregar_fonte(11), _carregar_fonte(20, negrito=True)
+
+    resumo = (d.assign(_C=d["VALOR"].where(cred, 0.0), _D=d["VALOR"].where(~cred, 0.0), _M=d["DATA_IMPORTACAO"].isna().astype(int))
+               .groupby(["EMPRESA", "COD_BANCO", "CONTA"], as_index=False)
+               .agg(Q=("VALOR", "size"), C=("_C", "sum"), D=("_D", "sum"), M=("_M", "sum"), A=("DATA", "min"))
+               .sort_values(["EMPRESA", "Q"], ascending=[True, False]))
+    mostra_detalhe = len(d) <= max_detalhe
+    det = d.sort_values(["EMPRESA", "CONTA", "DATA"], kind="stable") if mostra_detalhe else d.iloc[0:0]
+
+    ALT_CAB, ALT_CARD, ALT_TH, ALT_LIN = 30 + 18 + 4, 70, 28, 22
+    altura = (MARGEM + ALT_CAB + 22 + ALT_CARD + 24 + 22 + ALT_TH + len(resumo) * ALT_LIN + 24 + 22 + (ALT_TH + len(det) * ALT_LIN if mostra_detalhe else 26) + MARGEM)
+    img = Image.new("RGB", (round(LARGURA * _f), round(altura * _f)), "white")
+    draw = _DrawEscalado(ImageDraw.Draw(img), _f)
+
+    y = MARGEM
+    draw.text((MARGEM, y), _sanitizar_linha(titulo), font=f_tit, fill=_COR_TEXTO)
+    y += 30
+    draw.text((MARGEM, y), f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}", font=f_sub, fill=_COR_MUTED)
+    y += 18
+    draw.line([(MARGEM, y), (LARGURA - MARGEM, y)], fill=(12, 68, 123), width=2)
+    y += 22
+
+    cards = [("Lançamentos pendentes", str(len(d)), f"em {d['CONTA'].nunique()} conta(s) · {d['EMPRESA'].nunique()} empresa(s)", (30, 80, 140)),
+             ("Débitos pendentes", fmt(d.loc[~cred, "VALOR"].sum()), f"{int((~cred).sum())} lançamento(s)", _COR_VENCIDO),
+             ("Créditos pendentes", fmt(d.loc[cred, "VALOR"].sum()), f"{int(cred.sum())} lançamento(s)", _COR_OK_TEXTO)]
+    lc = (largura_util - 2 * 12) / 3
+    for i, (rot, val, sub, cor) in enumerate(cards):
+        x0 = MARGEM + i * (lc + 12)
+        draw.rectangle([x0, y, x0 + lc, y + ALT_CARD], outline=_COR_BORDA_TAB, fill=_COR_FUNDO_CARD)
+        draw.rectangle([x0, y, x0 + lc, y + 4], fill=cor)
+        draw.text((x0 + 12, y + 10), rot, font=f_card, fill=_COR_MUTED)
+        draw.text((x0 + 12, y + 26), val, font=f_num, fill=cor)
+        draw.text((x0 + 12, y + 52), sub, font=f_sub, fill=_COR_MUTED)
+    y += ALT_CARD + 24
+
+    def tabela(y, rotulos, pesos, linhas, alinha_dir=(), cores=None):
+        soma = sum(pesos)
+        largs = [largura_util * p / soma for p in pesos]
+        xs = [MARGEM + sum(largs[:i]) for i in range(len(largs))]
+        draw.rectangle([MARGEM, y, LARGURA - MARGEM, y + ALT_TH], outline=_COR_BORDA_TAB, fill=_COR_FUNDO_CARD)
+        for i, r in enumerate(rotulos):
+            tx = xs[i] + 6 if i not in alinha_dir else xs[i] + largs[i] - 6 - draw.textlength(r, font=f_th)
+            draw.text((tx, y + 7), r, font=f_th, fill=_COR_MUTED)
+        y += ALT_TH
+        for n, lin in enumerate(linhas):
+            for i, v in enumerate(lin):
+                t = _truncar_texto(draw, v, f_td, largs[i] - 12)
+                tx = xs[i] + 6 if i not in alinha_dir else xs[i] + largs[i] - 6 - draw.textlength(t, font=f_td)
+                cor = (cores[n][i] if cores and cores[n][i] else _COR_TEXTO)
+                draw.text((tx, y + 4), t, font=f_td, fill=cor)
+            y += ALT_LIN
+            draw.line([(MARGEM, y), (LARGURA - MARGEM, y)], fill=_COR_LINHA_TAB, width=1)
+        return y
+
+    draw.text((MARGEM, y), "Resumo por banco", font=f_th, fill=_COR_TEXTO)
+    y += 22
+    lin = [[r.EMPRESA, r.CONTA, str(int(r.Q)), fmt(r.C) if r.C else "-", fmt(r.D) if r.D else "-", str(int(r.M)), f"{pd.Timestamp(r.A):%d/%m/%Y}"]
+           for r in resumo.itertuples(index=False)]
+    y = tabela(y, ["Empresa", "Banco", "Pend.", "Créditos", "Débitos", "Imp. manual", "Mais antigo"], [1.6, 3.4, 0.7, 1.3, 1.3, 1.0, 1.1], lin, alinha_dir=(2, 3, 4, 5, 6))
+    y += 24
+    draw.text((MARGEM, y), "Lançamentos pendentes" if mostra_detalhe else f"Lançamentos pendentes: {len(d)} (detalhe no Excel e no PDF)", font=f_th, fill=_COR_TEXTO)
+    y += 22
+    if mostra_detalhe:
+        lin = [[f"{pd.Timestamp(r.DATA):%d/%m/%Y}", _valor_celula(r.CONTA), _valor_celula(r.DOCTO_BANCO), _valor_celula(r.TIPO_DOCTO), _valor_celula(r.HISTORICO), fmt(r.VALOR),
+                r.NATUREZA, "Importação Manual" if pd.isna(r.DATA_IMPORTACAO) else f"{pd.Timestamp(r.DATA_IMPORTACAO):%d/%m/%Y %H:%M}"] for r in det.itertuples(index=False)]
+        cores = [[None, None, None, None, None, None, _COR_OK_TEXTO if r[6] == "Crédito" else _COR_VENCIDO, (183, 96, 14) if r[7] == "Importação Manual" else None] for r in lin]
+        tabela(y, ["Data", "Banco", "Docto Banco", "Tipo Docto", "Histórico", "Valor", "Natureza", "Importação"], [0.9, 2.6, 0.8, 0.8, 2.2, 1.1, 0.8, 1.3], lin, alinha_dir=(5,), cores=cores)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def gerar_imagem_grupos_credito(
     df: pd.DataFrame,
     titulo: str = "Grupos de Crédito",

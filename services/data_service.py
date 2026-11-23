@@ -415,6 +415,43 @@ _COLUNAS_ERRO = ["ORGANIZACAO", "COD_FILIAL", "NOME_FILIAL", "SEGMENTO", "CATEGO
 
 
 @st.cache_data(show_spinner=False)
+def carregar_organizacoes_conciliacao() -> pd.DataFrame:
+    """Organizações do filtro da tela Pendências de Conciliação (COD_ORG, ORGANIZACAO), inventadas."""
+    return pd.DataFrame({"COD_ORG": [6, 25, 42500], "ORGANIZACAO": ["AGRÍCOLA DEMONSTRAÇÃO - CONSOLIDADORA FISCAL", "TECNOLOGIA DEMONSTRAÇÃO - CONSOLIDADORA FISCAL",
+                                                                   "TRANSPORTADORA DEMONSTRAÇÃO - CONSOLIDADORA"]})
+
+
+@st.cache_data(show_spinner=False)
+def carregar_pendencias_conciliacao(data_inicio: str, data_fim: str) -> pd.DataFrame:
+    """Lançamentos do extrato ainda não conciliados (COD_ORG, ORGANIZACAO, COD_FILIAL, FILIAL, COD_BANCO, CONTA, DATA, DOCTO_BANCO, TIPO_DOCTO, HISTORICO,
+    VALOR, NATUREZA, DATA_IMPORTACAO), inventados, só do período escolhido (datas DD/MM/AAAA)."""
+    rng = np.random.RandomState(nv.SEMENTE + 57)
+    hoje = pd.Timestamp(date.today()).normalize()
+    empresas = [(6, "AGRÍCOLA DEMONSTRAÇÃO - CONSOLIDADORA FISCAL", 1, "AGRÍCOLA DEMONSTRAÇÃO MATRIZ",
+                 [(101, "BANCO ALFA - AG 0001 CC 12345-6", 18), (102, "BANCO BETA - AG 0002 CC 23456-7", 9), (103, "BANCO GAMA - AG 0003 CC 34567-8", 4)]),
+                (25, "TECNOLOGIA DEMONSTRAÇÃO - CONSOLIDADORA FISCAL", 1, "TECNOLOGIA DEMONSTRAÇÃO MATRIZ",
+                 [(201, "BANCO ALFA - AG 0001 CC 45678-9", 26), (202, "BANCO DELTA - AG 0004 CC 56789-0", 7)]),
+                (42500, "TRANSPORTADORA DEMONSTRAÇÃO - CONSOLIDADORA", 42501, "TRANSPORTADORA DEMONSTRAÇÃO LTDA",
+                 [(301, "BANCO BETA - AG 0002 CC 67890-1", 11)])]
+    hist = [("AV DÉB", "104", "TAR EXT EL", "D", 1.2, 30), ("AV DÉB", "108", "CAMBIO AP-298247", "D", 1000, 90000), ("AV DÉB", "105", "DB JUROS ACC/ACE", "D", 6000, 14000),
+            ("PGELETR", "112", "PGTO FORNECEDORES - TRIB", "D", 40000, 600000), ("DOC D", "209", "PIX RECEBIDO DADOS CONTA", "C", 5000, 400000),
+            ("COBELET", "202", "COB COMPE", "C", 1000, 20000), ("TRANSF", "213", "PIX RECEB - 056.452.434-47", "C", 300, 9000)]
+    linhas = []
+    for cod, org, fil, nfil, contas in empresas:
+        for cb, conta, n in contas:
+            for _ in range(n):
+                tp, db, hs, nat, vmin, vmax = hist[rng.randint(len(hist))]
+                dt = hoje - pd.Timedelta(days=int(rng.randint(0, 28)))
+                imp = pd.NaT if rng.rand() < 0.12 else dt + pd.Timedelta(days=1, hours=3, minutes=int(rng.randint(40, 59)))
+                linhas.append({"COD_ORG": cod, "ORGANIZACAO": org, "COD_FILIAL": fil, "FILIAL": nfil, "COD_BANCO": cb, "CONTA": conta, "DATA": dt, "DOCTO_BANCO": db,
+                               "TIPO_DOCTO": tp, "HISTORICO": hs, "VALOR": round(float(rng.uniform(vmin, vmax)), 2), "NATUREZA": "Crédito" if nat == "C" else "Débito",
+                               "DATA_IMPORTACAO": imp})
+    df = pd.DataFrame(linhas).sort_values(["COD_ORG", "COD_BANCO", "DATA"]).reset_index(drop=True)
+    ini, fim = pd.to_datetime(data_inicio, format="%d/%m/%Y"), pd.to_datetime(data_fim, format="%d/%m/%Y")
+    return df[(df["DATA"] >= ini) & (df["DATA"] <= fim)].reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
 def carregar_aps_erro(data_inicio: str, data_fim: str) -> pd.DataFrame:
     e = _extra()["erros"].copy()
     ini, fim = pd.to_datetime(data_inicio, format="%d/%m/%Y"), pd.to_datetime(data_fim, format="%d/%m/%Y")

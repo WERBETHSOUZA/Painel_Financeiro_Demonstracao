@@ -11,7 +11,7 @@ from services.auth_service import authenticate_user, sanitize_username
 from services import permissoes
 from utils import atualizacao
 from services.data_service import (
-    carregar_aps_erro,
+    carregar_aps_erro, carregar_pendencias_conciliacao, carregar_organizacoes_conciliacao,
     carregar_relatorio_approvo, carregar_contas_receber, carregar_total_faturado_cliente,
     carregar_faturado_mensal_cliente, carregar_faturado_mensal_mi,
     carregar_contas_apagar, carregar_boletos_dda, DATA_CORTE_CONTAS_APAGAR, atualizar_se_antigo,
@@ -20,7 +20,7 @@ from services.data_service import (
     carregar_adiantamento_saldo_agente, carregar_variacao_cambial_me,
 )
 from components import rodape_lateral
-from views import inconsistencias, relatorios, contas_receber, relatorio_contas_apagar, grupo_credito, situacao_cliente, boletos_dda, adiantamentos, contas_receber_painel, relatorio_contas_receber, relatorio_contas_receber_mi, relatorio_fretes_mot_matriz_filial, faturamento_cliente_grupo, relatorio_desconto_financeiro_pendente, relatorio_descontos_operacionais_mi, relatorio_recebimentos, relatorio_boleto_nao_gerado, relatorio_grupos_credito, relatorio_variacao_cambial_me, acessos, faturamento_estado, visao_geral_comercial, resumo_pendencias
+from views import inconsistencias, relatorios, contas_receber, relatorio_contas_apagar, grupo_credito, situacao_cliente, boletos_dda, adiantamentos, contas_receber_painel, relatorio_contas_receber, relatorio_contas_receber_mi, relatorio_fretes_mot_matriz_filial, faturamento_cliente_grupo, relatorio_desconto_financeiro_pendente, relatorio_descontos_operacionais_mi, relatorio_recebimentos, relatorio_boleto_nao_gerado, relatorio_grupos_credito, relatorio_variacao_cambial_me, acessos, faturamento_estado, visao_geral_comercial, resumo_pendencias, pendencias_conciliacao
 
 
 def _pagina_aprovadores():
@@ -432,6 +432,7 @@ _ICONES_MENU = {
     "Financeiro > Inconsistências": '<circle cx="8" cy="8" r="6"/><path d="M8 4.8v4M8 11.2v.1"/>',
     "Tesouraria > Saldos Bancários": '<rect x="2" y="4" width="12" height="9" rx="1.5"/><path d="M2 7h12"/><circle cx="11" cy="10" r=".6"/>',
     "Tesouraria > Extratos Bancários": '<path d="M3 6h10M10.5 3.5 13 6l-2.5 2.5M13 10.5H3M5.5 8 3 10.5 5.5 13"/>',
+    "Tesouraria > Pendências de Conciliação": '<rect x="3" y="2.5" width="10" height="11" rx="1.5"/><path d="M5.5 6.5l1.5 1.5 3-3M5.5 11h5"/>',
     "Tesouraria > Recebimento por Banco": '<path d="M8 2v7M5 6.5l3 3 3-3M3 11v2.5h10V11"/>',
     "Comercial > Visão Geral Comercial": '<circle cx="8" cy="8" r="6"/><path d="M10.5 5.5 9 9 5.5 10.5 7 7z"/>',
     "Comercial > Grupo de Crédito": '<rect x="2" y="4" width="12" height="8.5" rx="1.5"/><path d="M2 7h12M4 10h2.5"/>',
@@ -505,6 +506,7 @@ PAINEIS_ADMIN = [
         ("❌", "Inconsistências"),
     ]),
     ("🏛️", "Tesouraria", [
+        ("🧾", "Pendências de Conciliação"),
         ("💵", "Recebimento por Banco"),
     ]),
     ("🛒", "Comercial", [
@@ -524,6 +526,7 @@ PAINEIS_ANALISTA = [
         ("❌", "Inconsistências"),
     ]),
     ("🏛️", "Tesouraria", [
+        ("🧾", "Pendências de Conciliação"),
         ("💵", "Recebimento por Banco"),
     ]),
     ("🛒", "Comercial", [
@@ -871,6 +874,8 @@ with st.sidebar:
             st.session_state.pop(chave_rfm, None)
         for chave_inc in ["_inc_periodo", "inc_periodo", "inc_filtro_sol"]:     # Inconsistências abre de novo no mês vigente, sem relatório gerado
             st.session_state.pop(chave_inc, None)
+        for chave_pc in ["_pc_periodo", "pc_periodo", "_pc_org", "pc_org", "pc_conta", "pc_nat"]:       # Pendências de Conciliação abre no mês vigente, sem relatório gerado
+            st.session_state.pop(chave_pc, None)
         for chave_rcmi in ["_rcmi_periodo", "rcmi_vencimento", "rcmi_status", "rcmi_grupo"]:
             st.session_state.pop(chave_rcmi, None)
         for chave in ["vencidas", "inconsistencias", "filtro_padrao",
@@ -951,15 +956,23 @@ with st.sidebar:
           }
         });
       }
-      // Barra recolhida + abriu uma tela que tem filtros na lateral (período, organização etc.): expande sozinha, uma vez por tela.
-      // Se você recolher de novo na mesma tela, ela respeita; só volta a expandir quando entrar em outra tela com filtros.
+      // Barra recolhida + abriu uma tela que tem filtros na lateral (período, organização etc.): expande sozinha, SEMPRE que entra numa tela com filtros
+      // (inclusive vindo de outra tela com filtros). Se você recolher de novo na mesma tela, ela respeita; mexer nos filtros não conta como tela nova.
       const SEL_FILTROS = '[data-testid="stSidebarUserContent"] :is([data-testid="stDateInput"], [data-testid="stMultiSelect"], [data-testid="stSelectbox"], [data-testid="stTextInput"], [data-testid="stNumberInput"], [data-testid="stRadio"], [data-testid="stCheckbox"], [data-testid="stSegmentedControl"], [data-testid="stSlider"])';
-      let tinhaFiltros = false;
+      let assinaturaTela = '';
       function expandeSeTemFiltros() {
         const s = side(); if (!s) return;
-        const tem = !!s.querySelector(SEL_FILTROS);
-        if (tem && !tinhaFiltros && recolhido()) s.setAttribute('data-ibc-rail', '0');
-        tinhaFiltros = tem;
+        const filtros = Array.from(s.querySelectorAll(SEL_FILTROS));
+        if (!filtros.length) { assinaturaTela = ''; return; }
+        // identidade da tela: título da página + legenda da lateral + só os RÓTULOS dos filtros (os valores escolhidos mudam e não contam)
+        const rotulos = filtros.map((e) => { const l = e.querySelector('label, [data-testid="stWidgetLabel"]'); return l ? (l.textContent || '').trim() : ''; }).join('/');
+        const h1 = doc.querySelector('[data-testid="stMain"] h1, [data-testid="stMainBlockContainer"] h1');
+        const leg = s.querySelector('[data-testid="stSidebarUserContent"] [data-testid="stCaptionContainer"]');
+        const assinatura = ((h1 && h1.textContent) || '') + '|' + ((leg && leg.textContent) || '') + '|' + rotulos;
+        if (assinatura !== assinaturaTela) {
+          if (recolhido()) s.setAttribute('data-ibc-rail', '0');
+          assinaturaTela = assinatura;
+        }
       }
       const SEL_BOTAO = '[data-testid="stSidebar"] [data-testid="stPopover"] button';
       const SEL_CORPO = '[data-testid="stPopoverBody"]';
@@ -1113,6 +1126,9 @@ with st.container():
         with st.spinner("Carregando dados..."):
             df_cr_rp = carregar_contas_receber()
         resumo_pendencias.render(df_cr_rp)
+
+    elif painel_atual == "Tesouraria > Pendências de Conciliação":
+        pendencias_conciliacao.render(carregar_pendencias_conciliacao, carregar_organizacoes_conciliacao)       # o período é escolhido na tela e só ele vai ao banco
 
     elif painel_atual == "Tesouraria > Recebimento por Banco":
         relatorio_recebimentos.render()
