@@ -651,8 +651,8 @@ def _pagina_inicial_relatorios():
 
 # ── Estado inicial ────────────────────────────────────────────────────────────
 if "_painel_ativo" not in st.session_state:
-    # quem está no grupo Resumo Pendências abre direto nele (só ao entrar; depois navega normalmente)
-    st.session_state["_painel_ativo"] = "Resumo Pendências" if permissoes.tem_resumo_pendencias(usuario, _dados_perm) else None
+    # todos entram só com o "Olá, <nome>" e escolhem o painel no menu (o Resumo Pendências não abre mais sozinho, nem para o grupo dele)
+    st.session_state["_painel_ativo"] = None
 
 # ── Identificação na barra recolhida: globo da logo + iniciais de quem entrou ─────────────────────────────
 @st.cache_resource
