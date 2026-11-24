@@ -1,12 +1,14 @@
 """
 views/relatorio_boleto_nao_gerado.py
 ======================================
-Relatório "Boleto Não Gerado": TODOS os títulos de Mercado Interno, Pessoa
+Relatório "Boletos a Gerar - MI": TODOS os títulos de Mercado Interno, Pessoa
 Jurídica, sem boleto gerado (A Vencer/Vencido) — com uma coluna Status:
 BLOQUEADO (desconto da regra ainda não aplicado — Faturamento/DESC_APLIC_NF
 ou Financeiro/DESC_APLIC_FIN) ou LIBERADO (nada travando, pronto pra gerar).
 Usa a mesma base do Contas a Receber (QUERY_CONTAS_RECEBER.sql).
 """
+
+import datetime
 
 import pandas as pd
 import streamlit as st
@@ -34,6 +36,7 @@ _COLUNAS = {
     "DESC_APLIC_FIN": "DESCONTO_FINANC",
     "SALDO_EM_ABERTO": "SALDO_EM_ABERTO",
     "STATUS":         "STATUS",
+    "COMPLEMENTO":    "COMPLEMENTO",
 }
 # SITUACAO_BOLETO não entra: o filtro já garante que nunca tem boleto gerado,
 # então sempre viria "-" — sem sentido mostrar.
@@ -61,7 +64,7 @@ def _formatar_numero(valor) -> str:
 def render(df_cr: pd.DataFrame) -> None:
     _col_t, _col_at = st.columns([8, 1])
     with _col_t:
-        st.title("Boleto Não Gerado")
+        st.title("Boletos a Gerar - MI")
     with _col_at:
         st.markdown("<div style='margin-top:1.05rem'></div>", unsafe_allow_html=True)
         if st.button("🔄 Atualizar", key="bng_atualizar", use_container_width=True):
@@ -69,7 +72,7 @@ def render(df_cr: pd.DataFrame) -> None:
             st.rerun()
 
     with st.sidebar:
-        st.caption("Boleto Não Gerado")
+        st.caption("Boletos a Gerar - MI")
         status_sel = st.multiselect(
             "Status", ["LIBERADO", "BLOQUEADO"], default=["LIBERADO"], key="rbn_status",
             help="Deixe em branco para trazer os dois.",
@@ -104,11 +107,7 @@ def render(df_cr: pd.DataFrame) -> None:
     # Cliente que paga por transferência (Admin > Clientes por Transferência) não recebe boleto: sai do relatório.
     _transf = clientes_transferencia.carregar()
     if _transf and "COD_CLIENTE" in df_base.columns:
-        _fora = df_base["COD_CLIENTE"].astype(str).isin(_transf)
-        if _fora.any():
-            _nomes = sorted({_transf[c].get("nome") or c for c in df_base.loc[_fora, "COD_CLIENTE"].astype(str).unique()})
-            df_base = df_base[~_fora]
-            st.info(f"{len(_nomes)} cliente(s) que pagam por transferência não aparecem aqui: {', '.join(_nomes)}.")
+        df_base = df_base[~df_base["COD_CLIENTE"].astype(str).isin(_transf)]
 
     if df_base.empty:
         st.success("Todos os títulos em aberto do Mercado Interno já têm boleto gerado.")
@@ -150,10 +149,12 @@ def render(df_cr: pd.DataFrame) -> None:
     for col in ("VALOR_FATURADO", "LIQUIDO_FIN", "DESC_APLIC_NF", "DESC_APLIC_FIN", "SALDO_EM_ABERTO"):
         if col in df_tela.columns:
             df_tela[col] = df_tela[col].apply(_formatar_numero)
+    if "COMPLEMENTO" in df_tela.columns:
+        df_tela["COMPLEMENTO"] = df_tela["COMPLEMENTO"].fillna("-").replace("", "-")
     df_tela = df_tela.rename(columns=_COLUNAS)
     render_tabela_html(df_tela)
 
-    botao_exportar_excel(_gerar_excel(df_filtrado), "Boleto_Nao_Gerado.xlsx", key="rbn_export")
+    botao_exportar_excel(_gerar_excel(df_filtrado), f"Boletos a Gerar {datetime.date.today():%d-%m-%Y}.xlsx", key="rbn_export")
 
 
 def _gerar_excel(df_filtrado: pd.DataFrame) -> bytes:
@@ -165,6 +166,8 @@ def _gerar_excel(df_filtrado: pd.DataFrame) -> bytes:
     for col in ("VALOR_FATURADO", "LIQUIDO_FIN", "DESC_APLIC_NF", "DESC_APLIC_FIN", "SALDO_EM_ABERTO"):
         if col in df_excel.columns:
             df_excel[col] = pd.to_numeric(df_excel[col], errors="coerce")
+    if "COMPLEMENTO" in df_excel.columns:
+        df_excel["COMPLEMENTO"] = df_excel["COMPLEMENTO"].fillna("-").replace("", "-")
     df_excel = df_excel.rename(columns=_COLUNAS)
     for col in set(_COLUNAS_PERCENTUAL_TEXTO) & set(df_excel.columns):
         df_excel[col] = (
@@ -177,6 +180,7 @@ def _gerar_excel(df_filtrado: pd.DataFrame) -> bytes:
         df_excel, "BOLETO_NAO_GERADO",
         colunas_situacao=("SITUACAO",), colunas_moeda=_COLUNAS_MOEDA,
         colunas_status={"STATUS": REGRAS_STATUS_BOLETO},
+        larguras_fixas={"ENTRADA": 13.5, "VENCIMENTO": 13.5, "PRORROGADO": 13.5, "COMPLEMENTO": 13.5},   # tamanho do exemplo do usuário
     )
 
 

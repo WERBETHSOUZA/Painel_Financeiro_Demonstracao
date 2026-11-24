@@ -3,7 +3,7 @@ views/resumo_pendencias.py
 ==========================
 Painel "Resumo Pendências": acompanhamento por QUANTIDADE (só o cartão Esperado e Recebido mostra também valores em reais) das pendências em aberto:
   - Descontos Contratuais Pendentes (mesma regra do card do Contas a Receber MI);
-  - Boletos Não Gerados (mesma regra do relatório; pronto para gerar x bloqueado por desconto);
+  - Boletos a Gerar (mesma regra do relatório; pronto para gerar x bloqueado por desconto);
   - Notas Pendentes de Validação (bloqueantes e validação manual, de todos os clientes do Mercado Interno);
   - Esperado e Recebido no banco DO DIA, em quantidade de títulos;
 e, embaixo, o gráfico das notas pendentes de validação (uma barra por nota; o NF abre o controle de venda no SyncProcess).
@@ -151,7 +151,7 @@ def _card_descontos(df_cr: pd.DataFrame) -> str:
 
 
 def _card_boletos(df_cr: pd.DataFrame) -> str:
-    titulo = "Boletos Não Gerados"
+    titulo = "Boletos a Gerar"
     st.session_state["_rp_xls_bol"] = False
     obrig = {"MERCADO", "SITUACAO_BOLETO", "SITUACAO", "TIPO_REGRA", "DESC_APLIC_NF", "DESC_APLIC_FIN", "COD_CLIENTE", "CLIENTE"}
     if df_cr is None or df_cr.empty or not obrig.issubset(df_cr.columns):
@@ -702,8 +702,8 @@ def _momento_dados() -> datetime.datetime:
     return datetime.datetime.now()
 
 
-_REL_DESCONTOS = "Relatórios > 📄 Descontos Contratuais Pendentes MI"
-_REL_BOLETOS = "Relatórios > 📄 Boleto Não Gerado"
+_REL_DESCONTOS = "Relatórios > 📄 Descontos Contratuais Pendentes - MI"
+_REL_BOLETOS = "Relatórios > 📄 Boletos a Gerar - MI"
 _CSS_ATALHOS = """<style>
 .st-key-rp_cards [data-testid="stHorizontalBlock"]{flex-wrap:wrap;gap:12px;row-gap:0}
 .st-key-rp_cards [data-testid="stColumn"]{flex:1 1 230px !important;min-width:230px !important;width:auto !important;margin-bottom:12px}
@@ -732,7 +732,9 @@ def _atalhos_card(chave: str, painel: str, estado: dict, gerar_excel, arquivo: s
     if not pode_abrir:
         return
     with st.container(key=f"rp_at_{chave}"):
-        c1, c2 = st.columns(2 if tem_excel else 1, gap="small")
+        colunas = st.columns(2 if tem_excel else 1, gap="small")      # sem Excel (nada pendente) é uma coluna só
+        c1 = colunas[0]
+        c2 = colunas[1] if tem_excel else None
         with c1:
             st.button("Abrir", icon=":material/open_in_new:", key=f"rp_abrir_{chave}", help="Abrir o relatório já gerado",
                       on_click=_abrir_relatorio, args=(painel, estado))
@@ -757,7 +759,7 @@ def _desenhar_cards(cards: list, df_cr: pd.DataFrame) -> None:
         with cols[1]:
             _atalhos_card("bol", _REL_BOLETOS, {"_rbn_gerou": True, "rbn_status": ["LIBERADO"]},
                           lambda: relatorio_boleto_nao_gerado.excel_liberados(df_cr) or b"",
-                          f"Boleto_Nao_Gerado_{datetime.date.today():%Y%m%d}.xlsx", st.session_state.get("_rp_xls_bol", False))
+                          f"Boletos a Gerar {datetime.date.today():%d-%m-%Y}.xlsx", st.session_state.get("_rp_xls_bol", False))
 
 
 def _sem_controle_repetido(notas: pd.DataFrame, pedidos) -> pd.DataFrame:

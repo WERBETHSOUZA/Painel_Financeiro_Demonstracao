@@ -5,7 +5,7 @@ Clientes do Mercado Interno que pagam por TRANSFERÊNCIA (todo cliente é boleto
 NENHUM cliente vem pré-cadastrado: a lista começa vazia em todo ambiente e só tem quem foi inserido manualmente na tela
 Admin > Clientes por Transferência.
 Grava em config/clientes_transferencia.json (fora do Git, como o permissoes.json; no servidor o arquivo é separado).
-Quem está na lista sai do relatório Boleto Não Gerado e ganha a fatia "Transferência" em Distribuição por Banco.
+Quem está na lista sai do relatório Boletos a Gerar - MI e ganha a fatia "Transferência" em Distribuição por Banco.
 A tela de cadastro fica em Admin > Clientes por Transferência.
 """
 

@@ -9,7 +9,7 @@ from openpyxl.utils import get_column_letter
 _COLUNAS_GERAL_PADRAO = {
     "AP", "NF", "DOC", "Cód. Agente", "COD_FILIAL", "COD_ORG", "COD_AGENTE",
     "COD_CLIENTE", "NUM_LANCTO", "Parcela", "PARC",
-    "Cód. Cliente", "Ano", "Semana", "NF", "Nosso Número",
+    "Cód. Cliente", "CÓD_CLIENTE", "Ano", "Semana", "NF", "Nosso Número",
     "Dias", "DIAS",
 }
 
@@ -49,6 +49,7 @@ def exportar_excel(df: pd.DataFrame, nome_aba: str = "RELATORIO", colunas_situac
                    colunas_sempre_vermelho: tuple = (),
                    colunas_cor_por_situacao: tuple = (),
                    colunas_situacao_sem_fundo: tuple = (),
+                   larguras_fixas: dict = None,
                    titulo_planilha: str = "") -> bytes:
     # colunas_valor_abs: exibe sem sinal (▼ só pela cor) mas mantém valor real para coloração condicional
     # titulo_planilha: se informado, vai na linha 1 (a tabela desce 2 linhas, com filtro, congelamento e cores ajustados)
@@ -289,6 +290,10 @@ def exportar_excel(df: pd.DataFrame, nome_aba: str = "RELATORIO", colunas_situac
             if coluna in _COLUNAS_MOEDA_PADRAO:
                 largura = max(largura, 16)
             planilha.column_dimensions[get_column_letter(i)].width = largura
+        # larguras_fixas: {"ENTRADA": 13.5} fixa a largura da coluna (vale sobre o ajuste ao conteúdo)
+        for coluna, largura in (larguras_fixas or {}).items():
+            if coluna in df.columns:
+                planilha.column_dimensions[get_column_letter(list(df.columns).index(coluna) + 1)].width = largura
 
         # ── Congela a primeira linha (cabeçalho) ────────────────────────────
         planilha.freeze_panes = "A2"

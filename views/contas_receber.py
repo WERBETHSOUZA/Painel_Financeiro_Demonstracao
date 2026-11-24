@@ -1379,7 +1379,7 @@ def render(df: pd.DataFrame, mostrar_titulo: bool = True, df_grupo_agentes=None,
     # em coluna estreita, rosca em cima); sem acesso, ficam os 3 de sempre.
     _desc = (
         resumo_descontos_pendentes(df_filtrado)
-        if "📄 Descontos Contratuais Pendentes MI" in st.session_state.get("_relatorios_visiveis", ()) else None
+        if "📄 Descontos Contratuais Pendentes - MI" in st.session_state.get("_relatorios_visiveis", ()) else None
     )
     with st.container(key="cr_blocos_resumo"):
         if _desc is not None:

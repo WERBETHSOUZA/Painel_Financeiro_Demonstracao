@@ -166,7 +166,7 @@ def _secao_transferencia(quem):
     """Clientes do Mercado Interno que pagam por transferência (todo cliente é boleto por padrão). Só o administrador padrão."""
     st.subheader("💱 Clientes por Transferência")
     st.caption("Todo cliente do Mercado Interno é boleto por padrão. Aqui ficam só os que pagam por transferência: eles saem do "
-               "relatório Boleto Não Gerado e ganham a fatia \"Transferência\" em Distribuição por Banco.")
+               "relatório Boletos a Gerar - MI e ganham a fatia \"Transferência\" em Distribuição por Banco.")
     lista = clientes_transferencia.carregar()
 
     df = carregar_lista_clientes()

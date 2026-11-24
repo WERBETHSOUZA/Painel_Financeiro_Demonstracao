@@ -1,7 +1,7 @@
 """
 views/relatorio_desconto_financeiro_pendente.py
 ==================================================
-Relatório "Descontos Contratuais Pendentes MI": todos os títulos de Mercado
+Relatório "Descontos Contratuais Pendentes - MI": todos os títulos de Mercado
 Interno com regra de desconto FINANCEIRO — pendente ou já aplicado, com uma
 coluna Status pra diferenciar — usando a mesma base do Contas a Receber
 (QUERY_CONTAS_RECEBER.sql).
@@ -82,6 +82,12 @@ def _chave(cliente, nf, parcela) -> tuple:
     return cliente, str(nf).strip(), str(parcela).strip()
 
 
+def _nome_curto(cod: int) -> str:
+    """1598 -> "UVA MI PP" (nome da classe de desconto sem o prefixo "(-) DESCONTO CONTRATUAL - ")."""
+    nome = DESCONTO_DESCRICAO.get(cod, "")
+    return nome.replace("(-) DESCONTO CONTRATUAL - ", "").strip() or "SEM NOME"
+
+
 def _montar_classes(df: pd.DataFrame) -> pd.DataFrame:
     """Acrescenta CLASSES_NF (classes de receita da parcela), LANCAMENTOS_DESCONTO
     (classes de desconto a lançar no Senior, % da regra sobre cada classe, classes
@@ -116,7 +122,7 @@ def _montar_classes(df: pd.DataFrame) -> pd.DataFrame:
                 sem.append(f"SEM CLASSE: {int(r.REDUZIDO)}")
             else:
                 por_desc[dest] = por_desc.get(dest, 0.0) + round(float(r.VALOR) * perc, 2)
-        linhas = [f"{d} - {_formatar_numero(v)}" for d, v in sorted(por_desc.items())]
+        linhas = [f"{d} - {_nome_curto(d)} - {_formatar_numero(v)}" for d, v in sorted(por_desc.items())]
         df.at[i, "LANCAMENTOS_DESCONTO"] = "\n".join(linhas + sem)
         lanc = lancados.get(k)
         if lanc is not None:
@@ -138,7 +144,7 @@ def _montar_classes(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def resumo_descontos_pendentes(df_cr: pd.DataFrame) -> dict | None:
-    """Pendentes do relatório "Descontos Contratuais Pendentes MI" para o card do Contas a Receber MI, com a mesma regra
+    """Pendentes do relatório "Descontos Contratuais Pendentes - MI" para o card do Contas a Receber MI, com a mesma regra
     dele: MI com regra FINANCEIRO, status pelas classes lançadas no Mega, e erro de mês já encerrado fora da conta.
     Devolve {pendentes, erros, valor, clientes, por_cliente[(cliente, qtd_titulos, desconto)]} (do cliente com mais
     desconto a lançar para o menor), ou None se faltar coluna ou a consulta das classes falhar (o card então some)."""
@@ -190,7 +196,7 @@ _LAYOUT = {   # coluna: (largura, horizontal do título, horizontal do corpo)
     "ENTRADA": (11.9, None, None), "VENCIMENTO": (15.6, None, None), "PRORROGADO": (14.7, None, None),
     "SITUACAO": (10.7, None, None), "DIAS": (7.6, "center", "center"), "CÓD.CLIENTE": (13, None, None),
     "CLIENTE": (64.1, None, None), "PARC": (8.3, None, None), "NF": (8.7, "center", "center"),
-    "%": (7.7, "center", None), "VALOR LIQUIDO NF": (20.4, None, None), "CLASSE DESCONTO": (20, None, None),
+    "%": (7.7, "center", None), "VALOR LIQUIDO NF": (20.4, None, None), "CLASSE DESCONTO": (42, None, None),
     "DESCONTO TOTAL": (13.1, "center", None), "VALOR ATUALIZADO": (14.7, "center", None),
     "STATUS": (18.3, "center", "center"),
 }
@@ -302,7 +308,7 @@ def _gerar_excel(df_filtrado: pd.DataFrame) -> bytes:
 def render(df_cr: pd.DataFrame) -> None:
     _col_t, _col_at = st.columns([8, 1])
     with _col_t:
-        st.title("Descontos Contratuais Pendentes MI")
+        st.title("Descontos Contratuais Pendentes - MI")
     with _col_at:
         st.markdown("<div style='margin-top:1.05rem'></div>", unsafe_allow_html=True)
         if st.button("🔄 Atualizar", key="dfp_atualizar", use_container_width=True):
@@ -310,7 +316,7 @@ def render(df_cr: pd.DataFrame) -> None:
             st.rerun()
 
     with st.sidebar:
-        st.caption("Descontos Contratuais Pendentes MI")
+        st.caption("Descontos Contratuais Pendentes - MI")
         status_sel = st.multiselect(
             "Status", _STATUS_OPCOES, default=["PENDENTE"], key="rdf_status",
             help="APLICADO = lançado no Mega conforme as classes. PENDENTE = tudo que não está "

@@ -60,6 +60,9 @@ _RELATORIOS_RENOMEADOS = {
     "💵 Recebimentos": "💵 Recebimento por Banco",
     "💵 Recebimentos Bancos": "💵 Recebimento por Banco",
     "📄 Descontos Realizados MI": "📄 Descontos Realizados",
+    "📄 Boleto Não Gerado": "📄 Boletos a Gerar - MI",
+    "📄 Descontos Contratuais Pendentes MI": "📄 Descontos Contratuais Pendentes - MI",
+    "📄 Desconto Financeiros Pendentes": "📄 Descontos Contratuais Pendentes - MI",
 }
 
 

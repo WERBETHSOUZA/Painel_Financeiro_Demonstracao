@@ -114,9 +114,9 @@ PAGINAS_RELATORIOS = {
     "📄 Contas a Receber - Exportação": _pagina_contas_receber_relatorio,
     "📄 Contas a Receber - MI": _pagina_contas_receber_mi,
     "📄 Fretes Mot - Matriz x Filial": lambda: relatorio_fretes_mot_matriz_filial.render(),
-    "📄 Descontos Contratuais Pendentes MI": _pagina_desconto_financeiro_pendente,
+    "📄 Descontos Contratuais Pendentes - MI": _pagina_desconto_financeiro_pendente,
     "📄 Descontos Realizados": lambda: relatorio_descontos_operacionais_mi.render(),
-    "📄 Boleto Não Gerado": _pagina_boleto_nao_gerado,
+    "📄 Boletos a Gerar - MI": _pagina_boleto_nao_gerado,
     "💳 Grupo de Crédito": _pagina_relatorio_grupos_credito,
     "💱 Variação Cambial ME": _pagina_variacao_cambial_me,
 }
@@ -139,9 +139,9 @@ CARTOES_RELATORIOS = {
     "📄 Contas a Receber - MI": ("Mercado Interno: pagos, vencidos e a vencer, com data de pagamento, desconto e baixa de adiantamento", "Contas a Receber"),
     "📄 Fretes Mot - Matriz x Filial": ("Adiantamentos e pagamentos de fretes: o que a Demo efetuou e o que a Filial recebeu, com as pendências no topo, por período de prorrogação", "Contas a Pagar"),
     "💱 Variação Cambial ME": ("Variação cambial de títulos ME com PTAX BCB escolhida", "Contas a Receber"),
-    "📄 Descontos Contratuais Pendentes MI": ("Regra Financeiro: pendentes e aplicados no Mega, com a classe de desconto a lançar", "Contas a Receber"),
+    "📄 Descontos Contratuais Pendentes - MI": ("Regra Financeiro: pendentes e aplicados no Mega, com a classe de desconto a lançar", "Contas a Receber"),
     "📄 Descontos Realizados": ("Descontos já realizados (ação 948), MI e ME: contratuais, operacionais e concedidos", "Movimento Financeiro"),
-    "📄 Boleto Não Gerado": ("Todos os títulos sem boleto, com status Liberado/Bloqueado", "Contas a Receber"),
+    "📄 Boletos a Gerar - MI": ("Todos os títulos sem boleto, com status Liberado/Bloqueado", "Contas a Receber"),
     "💳 Grupo de Crédito": ("Limite, disponível, % utilizado, documentação e status de faturamento por grupo", "Grupo de Crédito"),
 }
 

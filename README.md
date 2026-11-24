@@ -117,8 +117,8 @@ projeto/
     ├── relatorio_contas_receber_mi.py  # Relatório — Contas a Receber - MI
     ├── relatorio_movimentacao_financeira.py # Tesouraria — Extratos Bancários  [fora da demonstração]
     ├── resumo_contas_receber_mi.py     # Contas a Receber MI — visão Resumo (recebimentos por mês, PMR, comparação com o ano anterior)
-    ├── relatorio_boleto_nao_gerado.py  # Relatório — Boleto Não Gerado
-    ├── relatorio_desconto_financeiro_pendente.py # Relatório — Descontos Contratuais Pendentes MI
+    ├── relatorio_boleto_nao_gerado.py  # Relatório — Boletos a Gerar - MI
+    ├── relatorio_desconto_financeiro_pendente.py # Relatório — Descontos Contratuais Pendentes - MI
     ├── relatorio_descontos_operacionais_mi.py # Relatório — Descontos Realizados
     ├── relatorio_fretes_mot_matriz_filial.py # Relatório — Fretes Mot
     ├── relatorio_grupos_credito.py     # Relatório — Grupo de Crédito (limite, disponível e status por grupo)
@@ -250,10 +250,10 @@ Exportação completa dos títulos em aberto (MI + ME), reaproveitando a mesma c
 #### 📄 Contas a Receber - MI *(área Contas a Receber)*
 Títulos do **Mercado Interno** pagos, vencidos e a vencer, com data de pagamento, desconto e baixa de adiantamento. O **período de vencimento é obrigatório**; só ele vai ao banco (o banco lê a janela de emissão e o recorte por vencimento é feito em pandas, para a consulta responder em 2–3 s em qualquer período). Data de pagamento vem só das baixas 196/953; PAGO sai em azul no Excel (`Contas_a_Receber_MI dd-mm-aaaa a dd-mm-aaaa.xlsx`).
 
-#### 📄 Boleto Não Gerado *(área Contas a Receber)*
+#### 📄 Boletos a Gerar - MI *(área Contas a Receber)*
 Títulos do Mercado Interno sem boleto gerado, com status Liberado ou Bloqueado (desconto da regra ainda não aplicado). **Clientes que pagam por transferência** (cadastrados em Admin > Clientes por Transferência) não entram, e uma linha no topo informa quem foi deixado de fora.
 
-#### 📄 Descontos Contratuais Pendentes MI *(área Contas a Receber)*
+#### 📄 Descontos Contratuais Pendentes - MI *(área Contas a Receber)*
 Mercado Interno, regra Financeiro: os descontos contratuais ainda não aplicados, com a classe de desconto a lançar. Quando a classe de receita da NF **não está na tabela** `config/classes_desconto.py`, o título aparece com o status **SEM CLASSE DEFINIDA** (o motivo, em vermelho), e **nunca some**, nem quando a entrada é de um mês encerrado (os outros erros de mês encerrado continuam fora do relatório). A coluna de classes mostra qual classe falta (`SEM CLASSE: 1749`).
 
 #### 📄 Descontos Realizados *(área Movimento Financeiro)*
