@@ -232,23 +232,27 @@ def carregar_pedidos_em_validacao():
 
 @st.cache_data(show_spinner=False)
 def carregar_tratativas_pendentes():
-    """Tratativas de reclamação (devolução/desconto) aguardando aprovação (COD_CLIENTE, CONTROLE, NF, TIPO, NF_DEVOLUCAO, VALOR, APROVACAO,
-    DEFINIDA, RECLAMACAO, TRATATIVA), inventadas."""
-    hoje = pd.Timestamp(date.today())
+    """Reclamações de clientes em andamento, cada uma na sua etapa (COD_CLIENTE, CONTROLE, NF, REGISTRO, PROCEDE, QUALIDADE_CONCLUIDA, TIPO, NF_DEVOLUCAO,
+    VALOR, APROVACAO, DEFINIDA, APROVADA, RECLAMACAO), inventadas."""
+    hoje = pd.Timestamp(date.today()).replace(hour=10, minute=30)
     d = pd.Timedelta
+    nt = pd.NaT
+    def linha(cod, ctrl, nf, reg, proc, qual, tipo, valor, aprov, defin, aprovada, rec):
+        return {"COD_CLIENTE": cod, "CONTROLE": ctrl, "NF": nf, "REGISTRO": hoje - d(days=reg), "PROCEDE": proc,
+                "QUALIDADE_CONCLUIDA": nt if qual is None else hoje - d(days=qual), "TIPO": tipo, "NF_DEVOLUCAO": None, "VALOR": valor,
+                "APROVACAO": aprov, "DEFINIDA": nt if defin is None else hoje - d(days=defin),
+                "APROVADA": nt if aprovada is None else hoje - d(days=aprovada), "RECLAMACAO": rec}
     df = pd.DataFrame([
-        {"COD_CLIENTE": 1001, "CONTROLE": "CTV-2026-000762", "NF": "48001", "TIPO": 3, "NF_DEVOLUCAO": "159055", "VALOR": 9900.0,
-         "APROVACAO": 681, "DEFINIDA": hoje - d(days=21), "APROVADA": pd.NaT, "RECLAMACAO": 221, "TRATATIVA": 161},
-        {"COD_CLIENTE": 1001, "CONTROLE": "CTV-2026-003322", "NF": "48007", "TIPO": 2, "NF_DEVOLUCAO": None, "VALOR": 7238.0,
-         "APROVACAO": 861, "DEFINIDA": hoje - d(days=2), "APROVADA": pd.NaT, "RECLAMACAO": 243, "TRATATIVA": 201},
-        {"COD_CLIENTE": 1104, "CONTROLE": "CTV-2026-003324", "NF": "60348", "TIPO": 3, "NF_DEVOLUCAO": "56263", "VALOR": 5400.0,
-         "APROVACAO": 821, "DEFINIDA": hoje - d(days=6), "APROVADA": hoje - d(days=2), "RECLAMACAO": 261, "TRATATIVA": 181},
-        {"COD_CLIENTE": 1103, "CONTROLE": "CTV-2026-002266", "NF": "59147", "TIPO": 2, "NF_DEVOLUCAO": None, "VALOR": 5830.0,
-         "APROVACAO": 613, "DEFINIDA": hoje - d(days=12), "APROVADA": hoje - d(days=9), "RECLAMACAO": 202, "TRATATIVA": 123},
-        {"COD_CLIENTE": 1104, "CONTROLE": "CTV-2026-002084", "NF": "58849", "TIPO": 2, "NF_DEVOLUCAO": None, "VALOR": 4730.0,
-         "APROVACAO": 661, "DEFINIDA": hoje - d(days=20), "APROVADA": hoje - d(days=18), "RECLAMACAO": 181, "TRATATIVA": 141},
-        {"COD_CLIENTE": 1103, "CONTROLE": "CTV-2026-001821", "NF": "58611", "TIPO": 2, "NF_DEVOLUCAO": None, "VALOR": 648.0,
-         "APROVACAO": 581, "DEFINIDA": hoje - d(days=25), "APROVADA": hoje - d(days=24), "RECLAMACAO": 182, "TRATATIVA": 101}])
+        linha(1001, "CTV-2026-000762", "48001", 27, 1, 27, 3, 9900.0, 681, 26, None, 221),
+        linha(1001, "CTV-2026-003322", "48007", 13, 1, 12, 3, 7238.0, 861, 7, None, 243),
+        linha(1105, "CTV-2026-003347", "48020", 8, 1, 1, 2, 2200.0, 901, 0, None, 281),
+        linha(1103, "CTV-2026-003354", "48031", 7, 1, 5, None, None, None, None, None, 283),
+        linha(1104, "CTV-2026-003360", "48044", 3, 1, 1, None, None, None, None, None, 284),
+        linha(1103, "CTV-2026-002521", "59147", 20, None, None, None, None, None, None, None, 201),
+        linha(1104, "CTV-2026-003324", "60348", 11, 1, 11, 3, 5400.0, 821, 10, 6, 261),
+        linha(1103, "CTV-2026-002266", "58611", 18, 1, 17, 2, 648.0, 581, 14, 9, 182),
+        linha(1104, "CTV-2026-002084", "58849", 25, 1, 24, 2, 4730.0, 661, 20, 18, 181),
+        linha(1105, "CTV-2026-003401", "48090", 9, 0, 8, None, None, None, None, None, 290)])
     df["COD_CLIENTE"] = df["COD_CLIENTE"].astype("Int64")
     return df
 
@@ -412,6 +416,61 @@ def carregar_lista_clientes() -> pd.DataFrame:
 _COLUNAS_ERRO = ["ORGANIZACAO", "COD_FILIAL", "NOME_FILIAL", "SEGMENTO", "CATEGORIA_ERRO", "AP", "DOCUMENTO", "TIPO", "COD_AGENTE",
                  "TIPO_AGENTE", "NOME_AGENTE", "DATA", "SALDO", "TIPO_ACAO", "COD_ACAO", "ACAO", "CLASSE", "CENTRO_CUSTO",
                  "SOLICITANTE", "NUM_LANCTO"]
+
+
+@st.cache_data(show_spinner=False)
+def carregar_conferencia_matriz_filial(data_inicio: str, data_fim: str) -> pd.DataFrame:
+    """Conferência Matriz x Filial (conhecimentos e adiantamentos) do período, inventada: um par (efetuado e recebido) por lançamento, com pendências,
+    OK e aguardando pagamento, já na ordem da tela (pendências no topo)."""
+    ini, fim = pd.to_datetime(data_inicio, format="%d/%m/%Y"), pd.to_datetime(data_fim, format="%d/%m/%Y")
+    dias = max((fim - ini).days, 1)
+    rng = np.random.RandomState(nv.SEMENTE + 71)
+    org_i, org_p, fav_p, fav_i = "AGRÍCOLA DEMONSTRAÇÃO COMÉRCIO E EXPORTAÇÃO LTDA", "TRANSPORTADORA DEMONSTRAÇÃO - CONSOLIDADORA", "TRANSPORTADORA DEMONSTRAÇÃO LTDA", "AGRÍCOLA DEMONSTRAÇÃO COMÉRCIO E EXPORTAÇÃO LTDA"
+    casos = [("Conhecimento", "OK")] * 4 + [("Conhecimento", "AGUARDANDO")] * 4 + [("Conhecimento", "FALTA_BAIXA"), ("Conhecimento", "DIA_DIFERENTE"),
+             ("Adiantamento", "OK"), ("Adiantamento", "OK"), ("Adiantamento", "AGUARDANDO"), ("Adiantamento", "FALTA_981"), ("Adiantamento", "DIF_CC"), ("Adiantamento", "DIF_PROJETO")]
+    grupos = []
+    docto, ap = 2100, 400100
+    for grupo, caso in casos:
+        d = ini + pd.Timedelta(days=int(rng.randint(0, dias + 1)))
+        valor = round(float(rng.uniform(4000, 60000)), 2)
+        docto += int(rng.randint(1, 9))
+        ap += int(rng.randint(1, 30))
+        cte = grupo == "Conhecimento"
+        v = f"R$ {valor:.2f}".replace(".", ",")
+        cl_i, cl_p = f"1721 - Fretes - Mot - 100% - {v}", f"1722 - Adiantamento de Clientes - 100% - {v}"
+        cc, pj = f"73 - PRODUÇÃO DEMONSTRAÇÃO - 100% - {v}", f"520 - FRETES - MOT - 100% - {v}"
+        if cte:
+            cl_i, cl_p = f"1237 - Receita de Frete - 100% - {v}", f"109 - Receita de Prestação de Serviço - 100% - {v}"
+            cc_p, pj_p = f"303 - OPERACIONAL DEMONSTRAÇÃO - 100% - {v}", f"74 - APOIO OPERACIONAL - 100% - {v}"
+        else:
+            cc_p, pj_p = cc, pj
+        aberto_ef = caso in ("AGUARDANDO",)
+        ef = [grupo, "Efetuado", org_i, "CONHEC" if cte else "ADIANT", ap, str(docto) if cte else "2411" + str(docto), fav_p, valor, valor if aberto_ef else 0.0,
+              "EM ABERTO" if aberto_ef else "BAIXADO", None if (cte and aberto_ef) else d, "393 - RURAL - Conhecimento de frete Externo (Sem pedido)" if cte else
+              "55 - GERAL - Provisão Adiantamento a Fornecedores", cl_i, cc, pj, "USUARIO.DEMO", "OK"]
+        rc = None
+        if caso in ("OK", "FALTA_BAIXA", "DIA_DIFERENTE", "DIF_CC", "DIF_PROJETO") or (cte and caso == "AGUARDANDO"):
+            aberto_rc = caso in ("AGUARDANDO", "FALTA_BAIXA")
+            dt_rc = None if aberto_rc else (d + pd.Timedelta(days=2) if caso == "DIA_DIFERENTE" else d)
+            rc = [grupo, "Recebido", org_p, "CRECEBER" if cte else "AV DÉB", None, ef[5] if cte else str(515000 + docto), fav_i, valor, valor if aberto_rc else 0.0,
+                  "EM ABERTO" if aberto_rc else "BAIXADO", dt_rc, "905 - COMERCIAL- Provisão Contas a Receber" if cte else "981 - GERAL - Adiantamento de Clientes (ENTRADA)",
+                  cl_p, cc_p if caso != "DIF_CC" else f"54 - PACKING DEMONSTRAÇÃO - 100% - {v}", pj_p, None, "OK"]
+        conf = {"OK": "OK", "AGUARDANDO": "AGUARDANDO PAGAMENTO NA MATRIZ", "FALTA_BAIXA": "FALTA BAIXAR NA FILIAL", "DIA_DIFERENTE": "BAIXA EM DIA DIFERENTE",
+                "FALTA_981": "FALTA LANÇAR O 981", "DIF_CC": "DIFERENTE: CENTRO DE CUSTO", "DIF_PROJETO": "DIFERENTE: PROJETO FORA DO PADRÃO (520)"}[caso]
+        if caso == "DIF_PROJETO":
+            ef[14] = f"521 - OUTRO PROJETO - 100% - {v}"
+            rc[14] = ef[14]
+        cat = "OK" if conf == "OK" else "AGUARDANDO" if caso == "AGUARDANDO" else "PENDENCIA"
+        grupos.append((cat, 0 if cte else 1, d, [ef] + ([rc] if rc else []), conf))
+    ordem = {"PENDENCIA": 0, "OK": 1, "AGUARDANDO": 2}
+    grupos.sort(key=lambda g: (ordem[g[0]], g[1], g[2]))
+    linhas = []
+    for gid, (cat, _, _, par, conf) in enumerate(grupos):
+        for r in par:
+            linhas.append([gid] + r[:-1] + [conf, cat])
+    cols = ["GRUPO_ID", "GRUPO", "LADO", "ORG", "TIPO_DOCTO", "AP", "DOCTO", "FAVORECIDO", "VALOR", "SALDO", "STATUS", "DATA", "ACAO", "RATEIO_CLASSES",
+            "RATEIO_CENTRO_CUSTO", "RATEIO_PROJETO", "SOLICITANTE", "CONFERENCIA", "CATEGORIA"]
+    return pd.DataFrame(linhas, columns=cols)
 
 
 @st.cache_data(show_spinner=False)

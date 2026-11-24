@@ -137,7 +137,7 @@ CARTOES_RELATORIOS = {
     "💰 Adiantamentos":  ("Efetuados e recebidos em aberto", "Movimento Financeiro"),
     "📄 Contas a Receber - Exportação": ("Exportação completa dos títulos em aberto", "Contas a Receber"),
     "📄 Contas a Receber - MI": ("Mercado Interno: pagos, vencidos e a vencer, com data de pagamento, desconto e baixa de adiantamento", "Contas a Receber"),
-    "📄 Fretes Mot - Matriz x Filial": ("Contas a pagar de fretes (classe Mot) da Demo à Filial e da Filial à Siderúrgica, por período de prorrogação", "Contas a Pagar"),
+    "📄 Fretes Mot - Matriz x Filial": ("Adiantamentos e pagamentos de fretes: o que a Demo efetuou e o que a Filial recebeu, com as pendências no topo, por período de prorrogação", "Contas a Pagar"),
     "💱 Variação Cambial ME": ("Variação cambial de títulos ME com PTAX BCB escolhida", "Contas a Receber"),
     "📄 Descontos Contratuais Pendentes MI": ("Regra Financeiro: pendentes e aplicados no Mega, com a classe de desconto a lançar", "Contas a Receber"),
     "📄 Descontos Realizados": ("Descontos já realizados (ação 948), MI e ME: contratuais, operacionais e concedidos", "Movimento Financeiro"),
@@ -151,7 +151,7 @@ DIAS_ETIQUETA_NOVO = 10
 NOVOS_RELATORIOS = {
     "📄 Descontos Realizados": datetime(2026, 10, 26),
     "📄 Contas a Receber - MI": datetime(2026, 10, 30),
-    "📄 Fretes Mot - Matriz x Filial": datetime(2026, 11, 3),
+    "📄 Fretes Mot - Matriz x Filial": datetime(2026, 11, 24),
 }
 
 # ── Configurações globais ──────────────────────────────────────────────────────
@@ -413,6 +413,7 @@ ROTULOS_MENU = {
     "Financeiro > Inconsistências": "Inconsistências de Lançamento",
     "Tesouraria > Recebimento por Banco": "Recebimentos por Banco",
     "Comercial > Visão Geral Comercial": "Visão Geral Comercial - MI",
+    "Comercial > Pendências Gestão Documental": "Pendências Gestão Documental",
     "Comercial > Grupo de Crédito": "Limite Grupo de Crédito",
     "Comercial > Situação Cliente": "Situação do Cliente",
     "Comercial > Faturamento Cliente/Grupo": "Faturamento por Cliente ou Grupo",
@@ -435,10 +436,12 @@ _ICONES_MENU = {
     "Tesouraria > Pendências de Conciliação": '<rect x="3" y="2.5" width="10" height="11" rx="1.5"/><path d="M5.5 6.5l1.5 1.5 3-3M5.5 11h5"/>',
     "Tesouraria > Recebimento por Banco": '<path d="M8 2v7M5 6.5l3 3 3-3M3 11v2.5h10V11"/>',
     "Comercial > Visão Geral Comercial": '<circle cx="8" cy="8" r="6"/><path d="M10.5 5.5 9 9 5.5 10.5 7 7z"/>',
+    "Comercial > Pendências Gestão Documental": '<path d="M4 1.5h5.5L13 5v9.5H4z"/><path d="M9.5 1.5V5H13M6 8.5h5M6 11h5"/>',
     "Comercial > Grupo de Crédito": '<rect x="2" y="4" width="12" height="8.5" rx="1.5"/><path d="M2 7h12M4 10h2.5"/>',
     "Comercial > Situação Cliente": '<circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/>',
     "Comercial > Faturamento Cliente/Grupo": '<circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5a5 5 0 0 1 10 0"/>',
     "Comercial > Faturamento por UF": '<path d="M2.5 4 6 3l4 1.5 3.5-1v9L10 13.5 6 12l-3.5 1zM6 3v9M10 4.5v9"/>',
+    "Página Inicial": '<path d="M2 7.5 8 2.5l6 5M3.5 6.8V13a.5.5 0 0 0 .5.5h2.8V10h2.4v3.5H12a.5.5 0 0 0 .5-.5V6.8"/>',
     "Resumo Pendências": '<rect x="2.5" y="11.5" width="11" height="2.5" rx="1"/><path d="M4.5 11.5V8a3.5 3.5 0 0 1 7 0v3.5"/><path d="M8 1v2M2.6 3.2l1.3 1.3M13.4 3.2l-1.3 1.3"/>',
     "Admin": '<path d="M8 1.5 13 3.5v4c0 3-2.2 5.2-5 6-2.8-.8-5-3-5-6v-4z"/><path d="M5.8 8l1.7 1.7L10.5 6.5"/>',
     "Sair": '<path d="M6.5 2.5h-3v11h3"/><path d="M10 5l3 3-3 3M13 8H6.5"/>',
@@ -472,6 +475,8 @@ def _css_icones_menu(_selo_pendencias: int = 0) -> str:
             seletor = ".st-key-nav_hub_relatorios"
         elif nome == "Resumo Pendências":
             seletor = ".st-key-nav_resumo_pendencias"
+        elif nome == "Página Inicial":
+            seletor = ".st-key-nav_pagina_inicial"
         elif nome in ("Admin", "Sair"):
             seletor = f".st-key-{'admin' if nome == 'Admin' else 'sair'}_lateral"
         elif ">" in nome:
@@ -480,11 +485,11 @@ def _css_icones_menu(_selo_pendencias: int = 0) -> str:
             seletor = f'[class*="st-key-pop_{_slug_menu(nome)}_"]'
         regras.append(f'section[data-testid="stSidebar"] {seletor} button p::before, div[data-testid="stPopoverBody"] {seletor} button p::before'
                       f'{{background-image:url("{uri}")}}')
-    comum = ('section[data-testid="stSidebar"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias, [class*="st-key-pop_"]) button p::before, '
+    comum = ('section[data-testid="stSidebar"] :is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias, [class*="st-key-pop_"]) button p::before, '
              'div[data-testid="stPopoverBody"] :is([class*="st-key-nav_sub_"], .st-key-admin_lateral, .st-key-sair_lateral) button p::before'
              '{content:"" !important;display:inline-block;width:18px;height:18px;margin-right:10px;vertical-align:-3px;'
              'background-repeat:no-repeat;background-position:center;background-size:contain}'
-             'section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias, '
+             'section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias, '
              '[class*="st-key-pop_"]) button p::before{width:24px;height:24px;margin-right:0;vertical-align:middle}')
     selo = ""
     if _selo_pendencias:
@@ -511,6 +516,7 @@ PAINEIS_ADMIN = [
     ]),
     ("🛒", "Comercial", [
         ("🧭", "Visão Geral Comercial"),
+        ("🗂️", "Pendências Gestão Documental"),
         ("💳", "Grupo de Crédito"),
         ("🔍", "Situação Cliente"),
         ("📄", "Faturamento Cliente/Grupo"),
@@ -531,6 +537,7 @@ PAINEIS_ANALISTA = [
     ]),
     ("🛒", "Comercial", [
         ("🧭", "Visão Geral Comercial"),
+        ("🗂️", "Pendências Gestão Documental"),
         ("💳", "Grupo de Crédito"),
         ("🔍", "Situação Cliente"),
         ("📄", "Faturamento Cliente/Grupo"),
@@ -723,15 +730,15 @@ with st.sidebar:
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarUserContent"] { padding-left: 0 !important; padding-right: 0 !important; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarContent"] { padding-left: 0 !important; padding-right: 0 !important; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarUserContent"] [data-testid="stLayoutWrapper"] { width: 100% !important; justify-content: center !important; }
-        section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"]:not(:has(.ibc-rail-id)):not(.st-key-nav_hub_relatorios):not(.st-key-nav_resumo_pendencias):not(.st-key-admin_lateral):not(.st-key-sair_lateral):not(:has([data-testid="stPopover"])):not(:has(> iframe[height="0"])) { display: none !important; }
+        section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarUserContent"] [data-testid="stElementContainer"]:not(:has(.ibc-rail-id)):not(.st-key-nav_pagina_inicial):not(.st-key-nav_hub_relatorios):not(.st-key-nav_resumo_pendencias):not(.st-key-admin_lateral):not(.st-key-sair_lateral):not(:has([data-testid="stPopover"])):not(:has(> iframe[height="0"])) { display: none !important; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stHorizontalBlock"] { flex-direction: column !important; gap: 0.5rem !important; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarHeader"] > *:not([data-testid="stSidebarCollapseButton"]) { display: none !important; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stSidebarCollapseButton"] { transform: rotate(180deg); margin: 0 auto !important; }
-        section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button p,
+        section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button p,
         section[data-testid="stSidebar"][data-ibc-rail="1"] .st-key-admin_lateral button p,
         section[data-testid="stSidebar"][data-ibc-rail="1"] .st-key-sair_lateral button p,
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stPopover"] button p { font-size: 0 !important; }
-        section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button p::before,
+        section[data-testid="stSidebar"][data-ibc-rail="1"] :is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button p::before,
         section[data-testid="stSidebar"][data-ibc-rail="1"] .st-key-admin_lateral button p::before,
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stPopover"] button p::before { content: attr(data-ico); font-size: 1.35rem; }
         section[data-testid="stSidebar"][data-ibc-rail="1"] [data-testid="stPopover"] button [data-testid="stIconMaterial"] { display: none !important; }
@@ -783,23 +790,23 @@ with st.sidebar:
             border: 1px solid #4A7FB5 !important;
             color: #ffffff !important;
         }
-        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button {
+        :is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button {
             border: 1px solid rgba(250, 250, 250, 0.2);
             justify-content: center !important;
         }
-        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button > div {
+        :is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button > div {
             width: 100%;
             justify-content: center !important;
         }
-        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button [data-testid="stMarkdownContainer"],
-        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button p {
+        :is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button [data-testid="stMarkdownContainer"],
+        :is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button p {
             text-align: center !important;
             width: 100%;
         }
-        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button[data-testid="stBaseButton-secondary"] {
+        :is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button[data-testid="stBaseButton-secondary"] {
             background: transparent !important;
         }
-        :is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button[data-testid="stBaseButton-secondary"]:hover {
+        :is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button[data-testid="stBaseButton-secondary"]:hover {
             border-color: rgba(250, 250, 250, 0.45) !important;
         }
     </style>
@@ -858,7 +865,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.divider()
-    st.markdown(f'<h3 style="padding:.4rem 0 .5rem;margin:0">{_icone_img(_ICONE_PASTA_MENU, "#8ec2f5")}Menu</h3>', unsafe_allow_html=True)
+    # (o título "Menu" saiu: o primeiro item, Página Inicial, já abre a lista)
 
     def _resetar_filtros(nome_painel: str):
         st.session_state["_painel_ativo"] = nome_painel
@@ -874,6 +881,8 @@ with st.sidebar:
             st.session_state.pop(chave_rfm, None)
         for chave_inc in ["_inc_periodo", "inc_periodo", "inc_filtro_sol"]:     # Inconsistências abre de novo no mês vigente, sem relatório gerado
             st.session_state.pop(chave_inc, None)
+        for chave_rci in ["rci_grupo"]:          # Conferência Matriz x Filial abre no mês vigente, sem relatório gerado
+            st.session_state.pop(chave_rci, None)
         for chave_pc in ["_pc_periodo", "pc_periodo", "_pc_org", "pc_org", "pc_nat"] + [k for k in list(st.session_state) if str(k).startswith("pc_conta")]:
             st.session_state.pop(chave_pc, None)       # Pendências de Conciliação abre no mês vigente, sem relatório gerado
         for chave_rcmi in ["_rcmi_periodo", "rcmi_vencimento", "rcmi_status", "rcmi_grupo"]:
@@ -888,6 +897,11 @@ with st.sidebar:
     painel_ativo_menu = st.session_state["_painel_ativo"] or ""
     _selo_pendencias = resumo_pendencias.contar_validacao_manual() if permissoes.tem_resumo_pendencias(usuario, _dados_perm) else 0
     st.markdown(_css_icones_menu(_selo_pendencias), unsafe_allow_html=True)
+
+    # Página Inicial: primeiro item do menu, para todos; volta à tela do "Olá" (logo e saudação)
+    if st.button("Página Inicial", width="stretch", key="nav_pagina_inicial", type="primary" if painel_ativo_menu == "" else "secondary"):
+        if st.session_state["_painel_ativo"] is not None:
+            _resetar_filtros(None)
 
     for item in paineis:
         if len(item) == 3:
@@ -945,7 +959,7 @@ with st.sidebar:
       const seg = (window.Intl && Intl.Segmenter) ? new Intl.Segmenter('pt', { granularity: 'grapheme' }) : null;
       function marcaIcones() {
         const s = side(); if (!s) return;
-        s.querySelectorAll(':is(.st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button, .st-key-admin_lateral button, .st-key-sair_lateral button, [data-testid="stPopover"] button').forEach(function (b) {
+        s.querySelectorAll(':is(.st-key-nav_pagina_inicial, .st-key-nav_hub_relatorios, .st-key-nav_resumo_pendencias) button, .st-key-admin_lateral button, .st-key-sair_lateral button, [data-testid="stPopover"] button').forEach(function (b) {
           const p = b.querySelector('p'); if (!p) return;
           const t = (p.textContent || '').trim();
           if (!b.title) b.title = t;
@@ -1064,11 +1078,19 @@ if painel_atual != st.session_state.get("_painel_render_anterior"):
 
 with st.container():
     if painel_atual is None:
+        # tela inicial: a saudação no topo e, abaixo, a logomarca grande e centralizada com o "BI-FINANCEIRO" embaixo (mesmo conjunto da lateral)
         st.markdown(f"### 👋 Olá, {nome}!")
         if paineis_permitidos:
             st.caption("Selecione um painel no menu ao lado para começar.")
         else:
             st.warning("Seu usuário ainda não tem acesso a nenhum painel. Solicite a liberação ao administrador.")
+        st.markdown(
+            f"""<div style="text-align:center;padding:3rem 0 1rem;">
+                <img src="data:image/png;base64,{logo_b64}" alt="Demo BI-Financeiro" style="width:380px;max-width:70%;margin-bottom:10px;" />
+                <div style="font-size:22px;font-weight:700;letter-spacing:5px;text-transform:uppercase;color:#94a3b8;">BI-FINANCEIRO</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
 
     elif painel_atual == "Financeiro > Inconsistências":
         inconsistencias.render(carregar_aps_erro)       # o período é escolhido na tela e só ele vai ao banco
@@ -1126,6 +1148,13 @@ with st.container():
         with st.spinner("Carregando dados..."):
             df_cr_rp = carregar_contas_receber()
         resumo_pendencias.render(df_cr_rp)
+
+    elif painel_atual == "Comercial > Pendências Gestão Documental":       # o mesmo Resumo Pendências, só com alguns blocos, mais a Situação Grupo de Crédito
+        with st.spinner("Carregando dados..."):
+            df_cr_rgd = carregar_contas_receber()
+            df_agentes_rgd = carregar_grupo_credito_saldo_agente()
+            df_geral_rgd = carregar_grupo_credito_geral()
+        resumo_pendencias.render(df_cr_rgd, documental=True, df_grupo_agentes=df_agentes_rgd, df_grupo_geral=df_geral_rgd)
 
     elif painel_atual == "Tesouraria > Pendências de Conciliação":
         pendencias_conciliacao.render(carregar_pendencias_conciliacao, carregar_organizacoes_conciliacao, carregar_contas_conciliacao)       # o período é escolhido na tela e só ele vai ao banco

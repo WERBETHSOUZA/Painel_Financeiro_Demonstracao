@@ -468,9 +468,10 @@ def _selo(bloqueado: bool) -> str:
             f'font-weight:600;white-space:nowrap;background:{fundo};color:{cor}">● {txt}</span>')
 
 
-def _tabela_bloqueios(df_mi: pd.DataFrame, df_grupo_agentes, df_grupo_geral, ocultar: bool) -> None:
+def _tabela_bloqueios(df_mi: pd.DataFrame, df_grupo_agentes, df_grupo_geral, ocultar: bool, sem_valores: bool = False) -> None:
     """Situação Grupo de Crédito: todos os grupos de crédito (limite zerado ou não; mercado interno e externo), com ou
-    sem título em aberto (os títulos em aberto são os do Mercado Interno). Faturamento = título em aberto com prorrogação vencida; Documentação = situação do grupo."""
+    sem título em aberto (os títulos em aberto são os do Mercado Interno). Faturamento = título em aberto com prorrogação vencida; Documentação = situação do grupo.
+    sem_valores=True (painel do Comercial): sem as colunas Limite, Em aberto e Vencido (nenhum valor em R$)."""
     st.markdown("#### Situação Grupo de Crédito")
     if (df_grupo_geral is None or df_grupo_geral.empty or df_grupo_agentes is None or df_grupo_agentes.empty
             or not {"GRUPO_CODIGO", "NOME_GRUPO", "VALOR_LIMITE"}.issubset(df_grupo_geral.columns)
@@ -542,10 +543,10 @@ def _tabela_bloqueios(df_mi: pd.DataFrame, df_grupo_agentes, df_grupo_geral, ocu
         cab_col = lambda t, r=False: (f'<span style="color:#8892a4;font-size:11px;position:sticky;top:0;background:#1e1e2e;z-index:1;'
                                       f'padding-bottom:4px;{"text-align:right" if r else ""}">{t}</span>')
         corpo = (
-            '<div style="display:grid;grid-template-columns:minmax(0,1fr) 105px 115px 120px 120px 115px 46px;gap:7px 10px;align-items:center;font-size:13px;'
+            f'<div style="display:grid;grid-template-columns:minmax(0,1fr) 105px 115px {"" if sem_valores else "120px 120px 115px "}46px;gap:7px 10px;align-items:center;font-size:13px;'
             'max-height:340px;overflow-y:scroll;padding-right:6px;scrollbar-width:auto;scrollbar-color:#6b7690 #2a2a3a">'
-            + cab_col("Grupo") + cab_col("Faturamento") + cab_col("Documentação") + cab_col("Limite", True)
-            + cab_col("Em aberto", True) + cab_col("Vencido", True) + cab_col("Dias", True)
+            + cab_col("Grupo") + cab_col("Faturamento") + cab_col("Documentação")
+            + ("" if sem_valores else cab_col("Limite", True) + cab_col("Em aberto", True) + cab_col("Vencido", True)) + cab_col("Dias", True)
         )
         vazio = '<span style="color:#8892a4;text-align:right">—</span>'
         for r in bloq.itertuples():
@@ -560,7 +561,7 @@ def _tabela_bloqueios(df_mi: pd.DataFrame, df_grupo_agentes, df_grupo_geral, ocu
             corpo += (
                 f'<span style="color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{r.grupo}">{nome}</span>'
                 f'<span>{_selo(r.fat)}</span><span>{_selo(r.doc)}</span>'
-                f'<span style="color:#8892a4;text-align:right;white-space:nowrap">{fmt(r.limite)}</span>{aberto}{venc}{dias}'
+                + ("" if sem_valores else f'<span style="color:#8892a4;text-align:right;white-space:nowrap">{fmt(r.limite)}</span>{aberto}{venc}') + dias
             )
         corpo += "</div>"
     st.markdown(

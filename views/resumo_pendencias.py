@@ -427,10 +427,39 @@ def _html_para_desbloquear(df) -> str:
             f'<div style="max-height:156px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div></div></div>{rodape}</div>')   # largura mínima + rolagem lateral em tela pequena
 
 
-def _html_reclamacoes_pendentes(df, cliente: str | None, nomes: dict, df_cr: pd.DataFrame | None = None) -> str:
-    """Tabela pequena das tratativas de reclamação (devolução/desconto) no SyncProcess: pendentes primeiro (as há mais dias na frente), depois as aprovadas nos
-    últimos 30 dias, da mais recente à mais antiga (5 à vista, o resto na barra de rolagem). Saldo NF = o que ainda está em aberto da NF no Contas a
-    Receber (zerado = a NF já foi baixada, tratativa resolvida). Sem dados ou sem banco: não aparece."""
+def _situacao_reclamacao(r, saldo_nf, hoje: pd.Timestamp):
+    """Etapa em que a reclamação está (Reclamação > Qualidade > Tratativa e Execução > Aprovação). Devolve (ordem na tabela, texto, cor, detalhe). Situações: Qualidade pendente/recusada, Tratativa pendente, Aprovação pendente, Aprovada (desconto ou devolução a aplicar) e Concluída.
+    Concluída = NF com saldo zerado, em qualquer etapa (não há mais desconto nem devolução pendente na NF, ex.: a devolução já foi lançada no Mega)."""
+    def dias_desde(ts):
+        return max((hoje - pd.Timestamp(ts).normalize()).days, 0)
+
+    def ha(ts):
+        n = dias_desde(ts)
+        return "Hoje" if n == 0 else f"Há {n} {_plural(n, 'dia', 'dias')}"
+
+    reg = f"registrada {pd.Timestamp(r.REGISTRO):%d/%m %H:%M}" if pd.notna(r.REGISTRO) else ""
+    juntar = lambda *x: " · ".join(i for i in x if i)
+    if pd.notna(r.PROCEDE) and int(r.PROCEDE) == 0:
+        return 4, "Qualidade recusada", "#f3a3a2", juntar(reg.capitalize())
+    if saldo_nf is not None and abs(saldo_nf) < 0.005:          # NF zerada = sem desconto nem devolução pendente: concluída, em qualquer etapa
+        vinc = ("Devolução vinculada" if int(r.TIPO) == 3 else "Desconto vinculado") if pd.notna(r.TIPO) else "NF sem saldo em aberto"
+        return 5, "Concluída", "#6fd69a", juntar(vinc, f"aprovada {pd.Timestamp(r.APROVADA):%d/%m %H:%M}" if pd.notna(r.APROVADA) else "", reg)
+    if pd.isna(r.PROCEDE) or pd.isna(r.QUALIDADE_CONCLUIDA):
+        return 2, "Qualidade pendente", "#f5c070", juntar(ha(r.REGISTRO) if pd.notna(r.REGISTRO) else "", reg)
+    if pd.isna(r.TIPO):
+        return 1, "Tratativa pendente", "#f5c070", juntar(ha(r.QUALIDADE_CONCLUIDA), reg)
+    if pd.isna(r.APROVADA):
+        dias = dias_desde(r.DEFINIDA) if pd.notna(r.DEFINIDA) else 0
+        return 0, "Aprovação pendente", "#f3a3a2" if dias >= 7 else "#f5c070", juntar(ha(r.DEFINIDA) if pd.notna(r.DEFINIDA) else "", reg)
+    a_incluir = "Devolução a aplicar" if int(r.TIPO) == 3 else "Desconto a aplicar"          # aprovada, e a NF ainda tem saldo: falta aplicar o desconto ou a devolução
+    return 3, "Aprovada", "#f5c070", juntar(a_incluir, f"aprovada {pd.Timestamp(r.APROVADA):%d/%m %H:%M}", reg)
+
+
+def _html_reclamacoes_pendentes(df, cliente: str | None, nomes: dict, df_cr: pd.DataFrame | None = None, sem_valores: bool = False) -> str:
+    """Tabela das reclamações de clientes no SyncProcess, com a etapa em que cada uma está numa coluna só (Situação, em duas linhas: a etapa e a data).
+    Ordem: aprovação pendente (a mais antiga na frente), tratativa a definir, qualidade pendente, aprovada falta aplicar, qualidade recusada e concluídas
+    (da mais recente à mais antiga); 8 linhas à vista, o resto na barra de rolagem. Saldo NF = o que ainda está em aberto da NF no Contas a Receber
+    (zerado = baixada = Concluída, em qualquer etapa). sem_valores=True (Comercial): sem as colunas Desconto e Saldo NF. Sem dados ou sem banco: não aparece."""
     if df is None or df.empty:
         return ""
     d = df.copy()
@@ -445,41 +474,48 @@ def _html_reclamacoes_pendentes(df, cliente: str | None, nomes: dict, df_cr: pd.
                             _CLI=pd.to_numeric(df_cr["COD_CLIENTE"], errors="coerce").astype("Int64").astype(str))
         saldo = base.groupby(["_NF", "_CLI"])["SALDO_EM_ABERTO"].sum().to_dict()
     hoje = pd.Timestamp.today().normalize()
-    pend = d[d["APROVADA"].isna()].sort_values("DEFINIDA", na_position="last")                  # pendentes: as mais antigas (mais dias esperando) primeiro
-    d = pd.concat([pend, d[d["APROVADA"].notna()].sort_values("APROVADA", ascending=False)])    # depois as aprovadas, da mais recente para a mais antiga
-    grade = "grid-template-columns:54px minmax(0,1fr) 70px 82px 88px 48px 130px"
-    topo = (f'<div class="rp-rq rp-qh" style="{grade}"><span style="text-align:left">NF venda</span>'
-            '<span style="text-align:left">Cliente</span><span style="text-align:left">Tratativa</span><span class="rp-pz">Valor</span>'
-            '<span class="rp-pz" title="Saldo em aberto da NF no Contas a Receber (zerado = baixada)">Saldo NF</span><span class="rp-pz">Aprov.</span><span style="text-align:left">Situação</span></div>')
-    linhas, n_pend = "", 0
+    itens = []
     for r in d.itertuples(index=False):
-        pendente = pd.isna(r.APROVADA)
-        n_pend += pendente
+        sd = float(saldo.get((str(r.NF or "").strip(), r.COD), 0) or 0) if df_cr is not None else None
+        ordem, texto, cor, detalhe = _situacao_reclamacao(r, sd, hoje)
+        if ordem == 5 and pd.isna(r.APROVADA) and pd.notna(r.REGISTRO) and (hoje - pd.Timestamp(r.REGISTRO).normalize()).days > 30:
+            continue                                            # concluída sem tratativa (NF zerada) e registrada há mais de 30 dias: já não interessa
+        chave = {0: pd.Timestamp(r.DEFINIDA) if pd.notna(r.DEFINIDA) else hoje,                      # aprovação pendente: a mais antiga na frente
+                 1: pd.Timestamp(r.QUALIDADE_CONCLUIDA) if pd.notna(r.QUALIDADE_CONCLUIDA) else hoje,
+                 2: pd.Timestamp(r.REGISTRO) if pd.notna(r.REGISTRO) else hoje}.get(ordem)
+        if chave is None:                                        # demais: da mais recente à mais antiga
+            ref = r.APROVADA if ordem in (3, 5) else r.REGISTRO
+            chave = -pd.Timestamp(ref).value if pd.notna(ref) else 0
+        else:
+            chave = chave.value
+        itens.append((ordem, chave, r, sd, texto, cor, detalhe))
+    itens.sort(key=lambda x: (x[0], x[1]))
+    grade = f"grid-template-columns:54px minmax(0,1fr) 70px {'' if sem_valores else '82px 88px '}48px 190px"
+    topo = (f'<div class="rp-rq rp-qh" style="{grade}"><span style="text-align:left">NF venda</span>'
+            '<span style="text-align:left">Cliente</span><span style="text-align:left">Tratativa</span>' + ('' if sem_valores else '<span class="rp-pz" title="Valor fiscal autorizado do desconto ou da devolução (só existe depois que a tratativa é definida)">Desconto</span>'
+            '<span class="rp-pz" title="Saldo em aberto da NF no Contas a Receber (zerado = baixada)">Saldo NF</span>') + '<span class="rp-pz">Aprov.</span><span style="text-align:left">Situação</span></div>')
+    linhas, n_conc = "", 0
+    for ordem, _, r, sd, texto, cor, detalhe in itens:
+        n_conc += ordem == 5
         url = url_controle_venda(r.CONTROLE)            # a NF abre a aba Tratativa e Execução do controle de venda no SyncProcess
         nf = escape(str(r.NF or "—"))
         nf_html = (f'<a href="{url}?tab=tratativa-pane#tratativa-pane" target="_blank" rel="noopener noreferrer" '
                    f'title="Abrir Tratativa e Execução no SyncProcess">{nf}</a>' if url else nf)
-        devolucao = pd.notna(r.TIPO) and int(r.TIPO) == 3
-        tipo = "Devolução" if devolucao else ("Desconto" if pd.notna(r.TIPO) and int(r.TIPO) == 2 else "—")
+        tipo = "Devolução" if pd.notna(r.TIPO) and int(r.TIPO) == 3 else ("Desconto" if pd.notna(r.TIPO) and int(r.TIPO) == 2 else "—")
         valor = formatar_moeda(float(r.VALOR)) if pd.notna(r.VALOR) else "—"
         nome = nomes.get(r.COD, f"Cliente {r.COD}")
-        sd = float(saldo.get((str(r.NF or "").strip(), r.COD), 0) or 0) if df_cr is not None else None
         saldo_html = ("—" if sd is None else f'<span style="color:#6fd69a">{formatar_moeda(0)}</span>' if abs(sd) < 0.005
                       else f'<span style="color:#f5c070">{formatar_moeda(sd)}</span>')
-        if pendente:
-            dias = max((hoje - pd.Timestamp(r.DEFINIDA).normalize()).days, 0) if pd.notna(r.DEFINIDA) else None
-            cor = "#f3a3a2" if dias is not None and dias >= 7 else "#f5c070"
-            sit = f'<span style="color:{cor}">Pendente há {"—" if dias is None else f"{dias} " + _plural(dias, "dia", "dias")}</span>'
-        else:
-            sit = f'<span style="color:#6fd69a">Aprovada {pd.Timestamp(r.APROVADA):%d/%m %H:%M}</span>'
+        sit = (f'<span style="display:flex;flex-direction:column;line-height:1.25"><span style="color:{cor};font-size:13px">{texto}</span>'
+               f'<span style="color:#8892a4;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{escape(detalhe, quote=True)}">{escape(detalhe)}</span></span>')
         linhas += (f'<div class="rp-rq rp-qr" style="{grade}"><span>{nf_html}</span>'
                    f'<span class="rp-rcl" title="{escape(nome, quote=True)}">{escape(nome)}</span><span style="color:#d1d5db;font-size:13px">{tipo}</span>'
-                   f'<span class="rp-pz">{valor}</span><span class="rp-pz">{saldo_html}</span><span class="rp-pz">#{int(r.APROVACAO) if pd.notna(r.APROVACAO) else "—"}</span>'
-                   f'<span style="font-size:13px;white-space:nowrap">{sit}</span></div>')
+                   + (f'' if sem_valores else f'<span class="rp-pz">{valor}</span><span class="rp-pz">{saldo_html}</span>') + f'<span class="rp-pz">#{int(r.APROVACAO) if pd.notna(r.APROVACAO) else "—"}</span>'
+                   f'{sit}</div>')
     cabeca = ('<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
-              '<span style="color:#e0e0e0;font-size:14px;font-weight:600">Reclamações · aprovação das tratativas</span>'
-              f'<span style="font-size:11px;color:#8892a4">{int(n_pend)} pendente(s) · {len(d) - int(n_pend)} aprovada(s) nos últimos 30 dias</span></div>')
-    return _CSS_RQ + f'<div class="rp-lista" style="border-top-color:#378ADD;height:100%;box-sizing:border-box">{cabeca}<div style="overflow-x:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e"><div style="min-width:720px">{topo}<div style="max-height:156px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div></div></div></div>'   # largura mínima + rolagem lateral em tela pequena
+              '<span style="color:#e0e0e0;font-size:14px;font-weight:600">Reclamações · andamento</span>'
+              f'<span style="font-size:11px;color:#8892a4">{len(itens) - n_conc} em andamento · {n_conc} concluída(s) nos últimos 30 dias</span></div>')
+    return _CSS_RQ + f'<div class="rp-lista" style="border-top-color:#378ADD;height:100%;box-sizing:border-box">{cabeca}<div style="overflow-x:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e"><div style="min-width:{550 if sem_valores else 790}px">{topo}<div style="max-height:352px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div></div></div></div>'   # 8 linhas à vista; largura mínima + rolagem lateral em tela pequena
 
 
 def _prazo_colorido(ts, texto: str) -> str:
@@ -745,7 +781,9 @@ def contar_validacao_manual() -> int:
         return 0
 
 
-def render(df_cr: pd.DataFrame) -> None:
+def render(df_cr: pd.DataFrame, documental: bool = False, df_grupo_agentes=None, df_grupo_geral=None) -> None:
+    """documental=True é o painel Pendências Gestão Documental (Comercial): sem os quatro cartões, sem o botão Ocultar, sem a busca de cliente do quadro de
+    notas ; as reclamações mostram Desconto e Saldo NF, mas o bloco Situação Grupo de Crédito (no fim) fica sem valores em R$ (a busca "Pesquisar cliente ou grupo" vale só para ele)."""
     momento = _momento_dados()
     # o botão Ocultar usa o mesmo estado do Contas a Receber (cr_ocultar): esconder valores vale para o app todo
     if "cr_ocultar" not in st.session_state:
@@ -758,13 +796,14 @@ def render(df_cr: pd.DataFrame) -> None:
                 "animation:rp-anel-sirene 1.4s ease-out infinite}"
                 ".rp-h1{display:flex;align-items:center;padding:.5rem 0 .25rem;font-size:1.9rem !important;font-weight:700;line-height:1.2;color:#fafafa;"
                 "font-family:inherit;white-space:nowrap}</style>"
-                f"<div class='rp-h1'><span class='rp-sirene'>{_SIRENE}</span><span style='font-size:1.9rem'>Resumo Pendências</span>"
+                f"<div class='rp-h1'><span class='rp-sirene'>{_SIRENE}</span><span style='font-size:1.9rem'>{'Pendências Gestão Documental' if documental else 'Resumo Pendências'}</span>"
                 f"<span style='font-size:12px;font-weight:400;color:#6b7280;margin-left:14px;align-self:flex-end;padding-bottom:5px'>Última atualização {momento:%d/%m} às {momento:%H:%M}</span></div>"
                 "<style>.st-key-btn_ocultar_rp button,.st-key-rp_atualizar button,.st-key-rp_excel button{min-height:2rem;padding:.15rem .6rem}</style>")
     with c_oc:
-        st.button("Ocultar" if not ocultar else "Exibir", icon=":material/visibility_off:" if not ocultar else ":material/visibility:",
-                  key="btn_ocultar_rp", use_container_width=True, help="Ocultar/exibir o valor em R$ do cartão Esperado e Recebido no banco",
-                  on_click=lambda: st.session_state.update(cr_ocultar=not st.session_state.get("cr_ocultar", False)))
+        if not documental:
+          st.button("Ocultar" if not ocultar else "Exibir", icon=":material/visibility_off:" if not ocultar else ":material/visibility:",
+                    key="btn_ocultar_rp", use_container_width=True, help="Ocultar/exibir o valor em R$ do cartão Esperado e Recebido no banco",
+                    on_click=lambda: st.session_state.update(cr_ocultar=not st.session_state.get("cr_ocultar", False)))
     with c_at:
         if st.button("🔄 Atualizar", key="rp_atualizar", width="stretch"):
             st.cache_data.clear()
@@ -779,30 +818,17 @@ def render(df_cr: pd.DataFrame) -> None:
             notas = notas.assign(ROTULO="NF " + notas["NF"].astype(str))
             if pedidos is not None and not pedidos.empty:
                 notas = pd.concat([notas, pedidos], ignore_index=True)
-        cards = [_card_descontos(df_cr), _card_boletos(df_cr), _card_notas(notas), _card_esperado_recebido(df_cr, ocultar)]
-    _desenhar_cards(cards, df_cr)
+        cards = [] if documental else [_card_descontos(df_cr), _card_boletos(df_cr), _card_notas(notas), _card_esperado_recebido(df_cr, ocultar)]
+    if not documental:
+        _desenhar_cards(cards, df_cr)
 
     if notas is None:
         st.info("Não foi possível consultar as notas pendentes de validação agora.")
         return
     desbloquear = _para_desbloquear(notas)
-    # Para desbloquear e Reclamações ficam lado a lado, ACIMA do quadro de notas (sempre à vista, sem depender das abas nem do filtro de cliente);
-    # em tela estreita o Streamlit empilha
-    html_recl = _html_reclamacoes_pendentes(carregar_tratativas_pendentes(), None, _nomes_clientes(), df_cr)
-    if html_recl:
-        with st.container(key="rp_par"):                     # os dois cards com a mesma altura (a coluna e o html esticam até o card mais alto)
-            st.html("<style>.st-key-rp_par [data-testid='stHorizontalBlock']{align-items:stretch}"
-                    ".st-key-rp_par [data-testid='stColumn']>div,.st-key-rp_par [data-testid='stColumn'] [data-testid='stElementContainer'],"
-                    ".st-key-rp_par [data-testid='stColumn'] [data-testid='stHtml'],.st-key-rp_par [data-testid='stColumn'] [data-testid='stHtml']>div{height:100%}"
-                    "@media (max-width:1400px){.st-key-rp_par [data-testid='stHorizontalBlock']{flex-wrap:wrap}"
-                    ".st-key-rp_par [data-testid='stColumn']{min-width:100% !important}}</style>")   # tela pequena: um card embaixo do outro
-            c_desb, c_recl = st.columns([4, 6], gap="small")
-            c_desb.html(_CSS + _CSS_RQ + _html_para_desbloquear(desbloquear))
-            c_recl.html(_CSS + html_recl)
-    else:
-        st.html(_CSS + _CSS_RQ + _html_para_desbloquear(desbloquear))
+    desbloquear = _para_desbloquear(notas)
     n_vm = int(notas["TIPO"].isin(["MANUAL", "PEDIDO"]).sum())
-    c_filtro, c_busca = st.columns([1.6, 1], vertical_alignment="center")      # filtro e busca de cliente na mesma linha
+    c_filtro, c_busca = st.columns([1.6, 1] if not documental else [1, 0.001], vertical_alignment="center")      # filtro e busca de cliente na mesma linha
     with c_filtro:
         filtro = st.segmented_control("Notas", ["Todas", "Bloqueantes", "Validação manual", "A vencer (sem anexo)"], default="Todas",
                                       key="rp_filtro", label_visibility="collapsed",
@@ -820,7 +846,9 @@ def render(df_cr: pd.DataFrame) -> None:
         nfs = sorted(set(nfs_cli.get(c, [])))
         return f"{nomes_cli.get(c, 'Cliente ' + c)} - {c}" + (f" · NF {', '.join(nfs[:10])}{'…' if len(nfs) > 10 else ''}" if nfs else "")
 
+    cliente = None
     with c_busca:
+      if not documental:
         cliente = st.selectbox("Cliente", codigos, index=None, key="rp_cliente", placeholder="Buscar por código, nome ou número da NF...",
                                label_visibility="collapsed", format_func=_rotulo_cliente)
     st.html(_CSS + _grafico_notas(notas, filtro, cliente))
@@ -828,3 +856,22 @@ def render(df_cr: pd.DataFrame) -> None:
         botao_exportar_excel(lambda: _excel(notas, desbloquear), f"Resumo_Pendencias_{datetime.date.today():%Y%m%d}.xlsx",
                              key="rp_excel", use_container_width=True, label="Excel",
                              help="Duas abas: Notas pendentes e Para desbloquear")
+    # Para desbloquear e Reclamações ficam lado a lado, ABAIXO do quadro de notas (sempre à vista, sem depender das abas nem do filtro de cliente);
+    # em tela estreita o Streamlit empilha
+    html_recl = _html_reclamacoes_pendentes(carregar_tratativas_pendentes(), None, _nomes_clientes(), df_cr)          # as reclamações mostram Desconto e Saldo NF também no Comercial (são tratativas do Comercial e da Qualidade)
+    if html_recl:
+        with st.container(key="rp_par"):                     # os dois cards com a mesma altura (a coluna e o html esticam até o card mais alto)
+            st.html("<style>.st-key-rp_par [data-testid='stHorizontalBlock']{align-items:stretch}"
+                    ".st-key-rp_par [data-testid='stColumn']>div,.st-key-rp_par [data-testid='stColumn'] [data-testid='stElementContainer'],"
+                    ".st-key-rp_par [data-testid='stColumn'] [data-testid='stHtml'],.st-key-rp_par [data-testid='stColumn'] [data-testid='stHtml']>div{height:100%}"
+                    "@media (max-width:1400px){.st-key-rp_par [data-testid='stHorizontalBlock']{flex-wrap:wrap}"
+                    ".st-key-rp_par [data-testid='stColumn']{min-width:100% !important}}</style>")   # tela pequena: um card embaixo do outro
+            c_desb, c_recl = st.columns([4, 6], gap="small")
+            c_desb.html(_CSS + _CSS_RQ + _html_para_desbloquear(desbloquear))
+            c_recl.html(_CSS + html_recl)
+    else:
+        st.html(_CSS + _CSS_RQ + _html_para_desbloquear(desbloquear))
+    if documental:
+        from views import visao_geral_comercial          # bloco Situação Grupo de Crédito, o mesmo do painel Visão Geral Comercial - MI
+        if df_cr is not None and not df_cr.empty and "MERCADO" in df_cr.columns:
+            visao_geral_comercial._tabela_bloqueios(df_cr[df_cr["MERCADO"] == "MI"].copy(), df_grupo_agentes, df_grupo_geral, False, sem_valores=True)

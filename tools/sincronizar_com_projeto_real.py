@@ -28,7 +28,8 @@ VIEWS_FORA = {
     "relatorio_extrato_saldo_bancos.py",      # Saldos Bancários (base de teste)
     "relatorio_movimentacao_financeira.py",   # Extratos Bancários (consulta direta ao banco)
 }
-RENOMEAR = {"relatorio_fretes_mot_ibacem_pegasus.py": "relatorio_fretes_mot_matriz_filial.py"}
+RENOMEAR = {"relatorio_fretes_mot_ibacem_pegasus.py": "relatorio_fretes_mot_matriz_filial.py",
+            "relatorio_conferencia_ibacem_pegasus.py": "relatorio_conferencia_matriz_filial.py"}
 
 CONFIGS = ["settings.py", "frases.py", "pdd.py", "pagador.py", "classes_desconto.py"]
 SERVICOS = ["permissoes.py", "email_service.py", "excel_service.py", "clientes_transferencia.py"]
