@@ -391,70 +391,73 @@ def _credito_d1(vencimento: pd.Timestamp) -> pd.Timestamp:
     return d
 
 
-def _bloco_recebimento_hoje(ocultar: bool = False) -> str:
-    """Bloco "Hoje" do painel Recebimentos por Data: esperado, recebido no banco e a receber para o crédito do dia."""
-    from services.data_service import carregar_recebimento_hoje_mi
-    info = carregar_recebimento_hoje_mi()
-    if not info:
-        return ""
-    # Esperado = o que estava em aberto no começo do dia para este crédito: o que ainda está em aberto mais o que já foi
-    # baixado hoje desses títulos. Fica fixo durante o dia (só o recebido sobe e o a receber desce). O que foi quitado
-    # antes de hoje (pago adiantado, compensação, desconto) não entra: já não é cobrança do dia.
-    # Recebido = o que foi baixado hoje (data do banco) dos títulos do dia, mais baixa de ND (434) e adiantamento (981) se
-    # houver. Pagamento adiantado de títulos de outros vencimentos não entra.
-    aberto = max(info["aberto"], 0.0)
-    baixa_esperado = max(info.get("baixa_esperado", 0.0), 0.0)
-    esperado = aberto + baixa_esperado
-    nd = max(info.get("nd", 0.0), 0.0)
-    adiantamento = max(info.get("adiantamento", 0.0), 0.0)
-    recebido = baixa_esperado + nd + adiantamento
-    pct = baixa_esperado / esperado * 100 if esperado > 0 else 0.0
-    fmt = lambda v: "••••••" if ocultar else f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    pct_txt = "••" if ocultar else f"{pct:.2f}".replace(".", ",") + "%"
-    # Barra na escala do esperado mais o que entrou fora dele: baixado hoje, em aberto, ND e adiantamento
-    escala = esperado + nd + adiantamento
-    larg = lambda v: f"{v / escala * 100:.2f}" if escala > 0 else "0.00"
-    marca = (f'<div style="position:absolute;left:{larg(esperado)}%;top:-3px;width:2px;height:14px;background:#fff;border-radius:1px"></div>'
-             if nd + adiantamento > 0 else "")
-    barra = (
-        '<div style="position:relative;margin-top:9px">'
-        '<div class="an-wipe" style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:rgba(128,128,128,0.15)">'
-        f'<span style="width:{larg(baixa_esperado)}%;background:#4fa3e0"></span>'
-        f'<span style="width:{larg(aberto)}%;background:#5a6280"></span>'
-        f'<span style="width:{larg(nd)}%;background:#1BADA6"></span>'
-        f'<span style="width:{larg(adiantamento)}%;background:#D4537E"></span></div>'
-        + marca + '</div>'
-    )
-    itens = [f'baixado do esperado {fmt(baixa_esperado)}'] if esperado > 0 else []
-    if nd > 0:
-        itens.append(f'<span style="color:#1BADA6">+{fmt(nd)} ND baixadas</span>')
-    if adiantamento > 0:
-        itens.append(f'<span style="color:#D4537E">+{fmt(adiantamento)} adiantamento recebido</span>')
-    sem_esperado = esperado <= 0
-    rotulo = f'<span>{pct_txt} recebido</span>' if not sem_esperado else '<span>nada em aberto previsto para hoje</span>'
-    # o detalhe só aparece quando entrou algo além do baixado do esperado (ND ou adiantamento)
-    detalhe = f'<div style="color:#8892A4;font-size:10px;margin-top:2px">{" · ".join(itens)}</div>' if len(itens) > 1 else ""
+_MESES_ABREV = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
+_COR_RECEBIDO = "63,179,127"      # verde das barras do que já entrou no banco (o azul fica para o que ainda vai entrar)
+_COR_A_RECEBER = "79,163,224"
 
-    hoje = info["data"]
-    venc = info["vencimentos"]
-    origem = (f"vencidos em {venc[0]:%d/%m}" if len(venc) == 1 else f"vencidos de {min(venc):%d/%m} a {max(venc):%d/%m}")
-    meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
+
+def _linha_dia(i: int, ts: pd.Timestamp, pct_txt: str, larg: float, rgb: str, opac: str, val_txt: str) -> str:
+    """Uma linha do gráfico Recebimentos por Data: dia da semana, data, % do total, barra e valor."""
+    return (
+        '<div style="display:grid;grid-template-columns:36px 52px 38px minmax(0,1fr) 115px;'
+        'gap:6px;align-items:center;font-size:13px;padding:1px 0">'
+        f'<span style="background:rgba({rgb},0.15);color:rgb({rgb});font-size:10px;font-weight:700;'
+        f'border-radius:4px;padding:1px 4px;text-align:center;white-space:nowrap">{_DOW_PT[ts.weekday()]}</span>'
+        f'<span style="color:#e0e0e0;white-space:nowrap">{ts.day:02d}/{_MESES_ABREV[ts.month - 1]}</span>'
+        f'<span style="color:rgb({rgb});font-size:11px;font-weight:600;text-align:right;white-space:nowrap">{pct_txt}</span>'
+        '<div style="height:12px;border-radius:3px;background:rgba(128,128,128,0.15);overflow:hidden">'
+        f'<div class="an-wipe" style="animation-delay:{min(i, 14) * 45}ms;width:{larg:.1f}%;height:100%;background:rgba({rgb},{opac})"></div></div>'
+        f'<span style="color:#ffffff;font-size:12px;text-align:right;white-space:nowrap">{val_txt}</span>'
+        '</div>'
+    )
+
+
+def _linha_hoje(hoje: pd.Timestamp, recebido: float, a_receber: float, pct_txt: str, maximo: float, ocultar: bool) -> str:
+    """Linha de hoje na lista: barra em dois tons (recebido hoje em verde, a receber hoje em azul) e o valor a receber."""
+    fmt = lambda v: "••••••" if ocultar else f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    pr, pa = recebido / maximo * 100, a_receber / maximo * 100
+    return (
+        '<div style="display:grid;grid-template-columns:36px 52px 38px minmax(0,1fr) 115px;gap:6px;align-items:center;'
+        'font-size:13px;padding:1px 0;background:rgba(27,173,166,0.10);border-radius:4px">'
+        f'<span style="background:rgba(27,173,166,0.25);color:#1BADA6;font-size:10px;font-weight:700;border-radius:4px;'
+        f'padding:1px 4px;text-align:center;white-space:nowrap">{_DOW_PT[hoje.weekday()]}</span>'
+        f'<span style="color:#fff;font-weight:600;white-space:nowrap">{hoje.day:02d}/{_MESES_ABREV[hoje.month - 1]}</span>'
+        f'<span style="color:rgb({_COR_A_RECEBER});font-size:11px;font-weight:600;text-align:right;white-space:nowrap">{pct_txt}</span>'
+        '<div style="height:12px;border-radius:3px;background:rgba(128,128,128,0.15);overflow:hidden">'
+        f'<div class="an-wipe" style="display:flex;width:{pr + pa:.1f}%;height:100%">'
+        f'<span style="width:{(pr / (pr + pa) * 100) if pr + pa > 0 else 0:.1f}%;background:rgb({_COR_RECEBIDO})"></span>'
+        f'<span style="flex:1;background:rgb({_COR_A_RECEBER})"></span></div></div>'
+        f'<span style="color:#ffffff;font-size:12px;text-align:right;white-space:nowrap">{fmt(a_receber)}</span>'
+        '</div>'
+    )
+
+
+def _separador_dia(texto: str, cor: str, classe: str = "") -> str:
+    return (f'<div class="{classe}" style="display:flex;align-items:center;gap:8px;margin:5px 0;font-size:10px;color:{cor}">'
+            '<span style="flex:1;border-top:1px dashed #4a4a60"></span>' + texto +
+            '<span style="flex:1;border-top:1px dashed #4a4a60"></span></div>')
+
+
+def _card_hoje_html(info: dict, total_mes: float, rotulo_mes: str, ocultar: bool, hoje: pd.Timestamp) -> str:
+    """Card do dia: recebido no mês e, em dia útil, o recebido e o a receber de hoje (crédito do dia)."""
+    fmt = lambda v: "••••••" if ocultar else f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    colunas = [(f"Recebido em {rotulo_mes}", total_mes, "#00B050")]
+    if info:
+        # Recebido hoje = o que foi baixado hoje (data do banco) dos títulos do dia, mais baixa de ND (434) e adiantamento (981)
+        # se houver. A receber = o que do crédito de hoje ainda está em aberto.
+        recebido = (max(info.get("baixa_esperado", 0.0), 0.0) + max(info.get("nd", 0.0), 0.0)
+                    + max(info.get("adiantamento", 0.0), 0.0))
+        colunas += [(f"Recebido em {hoje:%d/%m}", recebido, "#4fa3e0"), (f"A receber em {hoje:%d/%m}", max(info["aberto"], 0.0), "#fff")]
+    celulas = "".join(
+        f'<div><div style="color:#8892A4;font-size:11px">{rot}</div>'
+        f'<div style="color:{cor};font-size:15px;font-weight:600;white-space:nowrap">{fmt(v)}</div></div>'
+        for rot, v, cor in colunas)
     return (
         '<div style="background:#252B3D;border:1px solid #3a4160;border-radius:8px;padding:10px 12px;margin-bottom:10px">'
-        '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">'
         '<div style="display:flex;align-items:center;gap:8px">'
         '<span style="background:rgba(27,173,166,0.2);color:#1BADA6;font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px">HOJE</span>'
-        f'<span style="color:#e0e0e0;font-size:13px;font-weight:500">{_DOW_PT[hoje.weekday()]} {hoje.day:02d}/{meses[hoje.month - 1]}</span></div>'
-        f'<span style="color:#8892A4;font-size:11px">crédito de títulos {origem}</span></div>'
-        '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:8px">'
-        f'<div><div style="color:#8892A4;font-size:11px">Esperado</div><div style="color:#fff;font-size:15px;font-weight:600;white-space:nowrap">{fmt(esperado)}</div></div>'
-        f'<div><div style="color:#8892A4;font-size:11px">Recebido no banco</div><div style="color:#4fa3e0;font-size:15px;font-weight:600;white-space:nowrap">{fmt(recebido)}</div></div>'
-        f'<div><div style="color:#8892A4;font-size:11px">A receber</div><div style="color:#fff;font-size:15px;font-weight:600;white-space:nowrap">{fmt(aberto)}</div></div></div>'
-        + barra +
-        '<div style="display:flex;justify-content:space-between;color:#8892A4;font-size:10px;margin-top:4px">'
-        f'{rotulo}' + ('' if sem_esperado else f'<span>{info["abertas"]} parcela(s) em aberto</span>') + '</div>'
-        + detalhe + '</div>'
-        '<div style="color:#8892A4;font-size:11px;margin:0 0 6px">Próximos recebimentos</div>'
+        f'<span style="color:#e0e0e0;font-size:13px;font-weight:500">{_DOW_PT[hoje.weekday()]} {hoje.day:02d}/{_MESES_ABREV[hoje.month - 1]}</span></div>'
+        f'<div style="display:grid;grid-template-columns:repeat({len(colunas)},minmax(0,1fr));gap:10px;margin-top:8px">{celulas}</div></div>'
     )
 
 
@@ -560,7 +563,8 @@ def _excel_recebimentos(df_base: pd.DataFrame, ano: int, mes: int) -> bytes:
 
 @st.fragment
 def _card_recebimentos_dia(df: pd.DataFrame, ocultar: bool = False):
-    """Card Recebimentos por Data com o botão A receber | Recebido: o card gira e mostra o outro lado."""
+    """Card Recebimentos por Data com a lista de meses: o mês atual mostra o card do dia e uma lista só (o que já entrou
+    acima de HOJE e o que vai entrar abaixo); mês fechado mostra o total e o recebido de cada dia."""
     hoje = pd.Timestamp.today().normalize()
     meses_nome = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro",
                   "Outubro", "Novembro", "Dezembro"]
@@ -568,78 +572,129 @@ def _card_recebimentos_dia(df: pd.DataFrame, ocultar: bool = False):
     for i in range(12):
         m = hoje.replace(day=1) - pd.DateOffset(months=i)
         opcoes.append((m.year, m.month))
-    c_tit, _, c_mes, c_modo = st.columns(_COLUNAS_TITULO_BOTAO, vertical_alignment="center")
+    c_tit, _, _, c_mes = st.columns(_COLUNAS_TITULO_BOTAO, vertical_alignment="center")
     with c_tit:
         st.markdown("#### Recebimentos por Data")
-    with c_modo:
-        st.markdown(_CSS_BOTAO_CANTO, unsafe_allow_html=True)
-        with st.container(key="cr_rec_canto"):
-            modo = st.segmented_control("Recebimentos", ["A receber", "Recebido"], default="A receber",
-                                        key="cr_rec_modo", label_visibility="collapsed", width="stretch")
-    ano, mes = st.session_state.get("cr_rec_mes", opcoes[0])
-    if modo == "Recebido":
-        with c_mes:
-            ano, mes = st.selectbox("Mês", opcoes, key="cr_rec_mes", label_visibility="collapsed",
-                                    format_func=lambda o: f"{meses_nome[o[1] - 1][:3]}/{o[0]}")
-        _recebido_mes(ocultar, ano, mes)
+    with c_mes:
+        ano, mes = st.selectbox("Mês", opcoes, key="cr_rec_mes", label_visibility="collapsed",
+                                format_func=lambda o: f"{meses_nome[o[1] - 1][:3]}/{o[0]}")
+    if (ano, mes) == (hoje.year, hoje.month):
+        _recebimentos_mes_atual(df, ocultar, ano, mes)
     else:
-        _tabela_recebimentos_dia(df, ocultar)
+        _recebimentos_mes_fechado(ocultar, ano, mes)
     botao_exportar_excel(lambda: _excel_recebimentos(df, ano, mes), f"Recebimentos_MI_{ano}-{mes:02d}.xlsx",
                          key="cr_export_recebimentos",
                          help="Três abas: Resumo, A receber (títulos em aberto) e Recebido (só o que entrou no banco no mês selecionado)")
 
 
-def _recebido_mes(ocultar: bool, ano: int, mes: int):
-    """Lado "Recebido" do card: o que foi baixado no banco no mês escolhido (o atual vai até hoje), por dia da baixa."""
+def _recebido_por_dia(inicio: pd.Timestamp, fim: pd.Timestamp) -> pd.DataFrame:
+    """Valor baixado no banco por dia da baixa, no período (só o que entrou: sem desconto nem adiantamento)."""
     from services.data_service import carregar_recebido_periodo_mi
+    rec = carregar_recebido_periodo_mi(inicio.date(), fim.date())
+    if rec.empty:
+        return pd.DataFrame(columns=["DIA", "VALOR_PAGO"])
+    pago = rec[rec["VALOR_PAGO"] > 0]
+    return pago.groupby("DIA")["VALOR_PAGO"].sum().reset_index().sort_values("DIA")
+
+
+def _recebimentos_mes_atual(df: pd.DataFrame, ocultar: bool, ano: int, mes: int):
+    """Mês atual: card do dia + lista única (recebido acima de HOJE, a receber abaixo; abre posicionada em HOJE)."""
+    from services.data_service import carregar_recebimento_hoje_mi
     hoje = pd.Timestamp.today().normalize()
+    fmt = lambda v: "••••••" if ocultar else f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    por_dia = _recebido_por_dia(pd.Timestamp(year=ano, month=mes, day=1), hoje)
+    total_mes = float(por_dia["VALOR_PAGO"].sum())
+    # A receber: títulos em aberto de hoje em diante, agrupados pela data de crédito (vencimento + 1 dia útil)
+    futuros = pd.DataFrame(columns=["Data", "Total"])
+    if "PRORROGADO" in df.columns:
+        ab = df[df["SALDO_EM_ABERTO"].fillna(0) > 0].copy()
+        ab["PRORROGADO"] = pd.to_datetime(ab["PRORROGADO"], errors="coerce")
+        ab = ab[ab["PRORROGADO"] >= hoje].dropna(subset=["PRORROGADO"])
+        if not ab.empty:
+            ab["_CREDITO"] = ab["PRORROGADO"].apply(_credito_d1)
+            futuros = (ab.groupby("_CREDITO")["SALDO_EM_ABERTO"].sum().reset_index()
+                       .rename(columns={"_CREDITO": "Data", "SALDO_EM_ABERTO": "Total"}).sort_values("Data"))
+    info = carregar_recebimento_hoje_mi()
+    card = _card_hoje_html(info, total_mes, f"{_MESES_ABREV[mes - 1]}/{ano}", ocultar, hoje)
+    # Hoje: o crédito do dia (títulos vencidos no dia útil anterior) ainda em aberto não está em `futuros`, que começa
+    # amanhã; entra como a primeira linha abaixo de HOJE. Só em dia útil (`info` vazio no fim de semana).
+    hoje_receber = max(info["aberto"], 0.0) if info else 0.0
+    hoje_recebido = (max(info.get("baixa_esperado", 0.0), 0.0) + max(info.get("nd", 0.0), 0.0)
+                     + max(info.get("adiantamento", 0.0), 0.0)) if info else 0.0
+    if por_dia.empty and futuros.empty and not info:
+        st.markdown('<div style="background:#1e1e2e;border-radius:8px;padding:12px 16px">' + card + '</div>', unsafe_allow_html=True)
+        st.info("Nenhum recebimento neste mês e nada a vencer.")
+        return
+    total_fut = (futuros["Total"].sum() + hoje_receber) or 1       # base do % das linhas a receber
+    # Total do mês = o que já entrou + o que ainda entra até o fim do mês (data de crédito dentro do mês); para comparar os dois.
+    no_mes = futuros[(futuros["Data"].dt.year == ano) & (futuros["Data"].dt.month == mes)] if not futuros.empty else futuros
+    total_do_mes = total_mes + hoje_receber + float(no_mes["Total"].sum() if not no_mes.empty else 0)
+    maximo = max(por_dia["VALOR_PAGO"].max() if not por_dia.empty else 0, futuros["Total"].max() if not futuros.empty else 0,
+                 hoje_receber + hoje_recebido) or 1
+    pct = lambda v, t: "••" if ocultar else f"{v / t * 100:.2f}%"
+    linhas_pass = "".join(
+        _linha_dia(i, pd.Timestamp(r.DIA), pct(r.VALOR_PAGO, total_mes or 1), r.VALOR_PAGO / maximo * 100, _COR_RECEBIDO,
+                   "1" if (len(por_dia) - 1 - i) < 3 else "0.6", fmt(r.VALOR_PAGO))
+        for i, r in enumerate(por_dia.itertuples()))
+    linhas_fut = "".join(
+        _linha_dia(i, pd.Timestamp(r.Data), pct(r.Total, total_fut), r.Total / maximo * 100, _COR_A_RECEBER,
+                   _OPACIDADES_RANKING[i] if i < len(_OPACIDADES_RANKING) else "0.12", fmt(r.Total))
+        for i, r in enumerate(futuros.itertuples()))
+    st.markdown(
+        _CSS_GIRO
+        + f'<div style="{_ANIM_GIRO}background:#1e1e2e;border-radius:8px;padding:12px 16px;min-height:400px">'
+        + card
+        + '<div style="color:#8892A4;font-size:11px;margin:0 0 6px">Recebimentos · role para cima para ver o que já foi recebido</div>'
+        + '<div class="cr-rec-scroll" style="position:relative;max-height:255px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">'
+        + (_separador_dia("já recebido", "rgb(" + _COR_RECEBIDO + ")") + linhas_pass if linhas_pass else "")
+        + _separador_dia(f"HOJE · {hoje:%d/%m}", "#1BADA6", "cr-rec-hoje")
+        + (_linha_hoje(hoje, hoje_recebido, hoje_receber, pct(hoje_receber, total_fut), maximo, ocultar) if info else "")
+        + linhas_fut
+        + '</div>'
+        + '<div style="height:1px;background:#2a2a3a;margin:6px 0"></div>'
+        + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">'
+        + '<span style="color:#8892A4;font-size:11px">Recebido = dia da baixa (pagamento no banco) · A receber = data de crédito (vencimento + 1 dia útil)</span>'
+        + f'<span style="color:#8892A4;font-size:11px" title="Recebido + a receber até o fim do mês">Total do mês <b style="color:#fff;font-size:13px;margin-left:4px">{fmt(total_do_mes)}</b></span></div>'
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+    # A lista abre posicionada em HOJE (o recebido fica acima, na rolagem); o st.markdown não executa script.
+    import streamlit.components.v1 as components
+    components.html(
+        "<script>(function(){var n=0,t=setInterval(function(){var d=window.parent.document,"
+        "s=d.querySelector('.cr-rec-scroll'),h=d.querySelector('.cr-rec-hoje');"
+        "if(s&&h){s.scrollTop=s.scrollTop+h.getBoundingClientRect().top-s.getBoundingClientRect().top-4;clearInterval(t);}if(++n>40)clearInterval(t);},100);})();</script>",
+        height=0)
+
+
+def _recebimentos_mes_fechado(ocultar: bool, ano: int, mes: int):
+    """Mês fechado: total recebido, maior dia e o recebido de cada dia (do mais recente ao mais antigo)."""
+    fmt = lambda v: "••••••" if ocultar else f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     inicio = pd.Timestamp(year=ano, month=mes, day=1)
-    fim = min(inicio + pd.offsets.MonthEnd(0), hoje)
-    df = carregar_recebido_periodo_mi(inicio.date(), fim.date())
-    if df.empty:
+    por_dia = _recebido_por_dia(inicio, inicio + pd.offsets.MonthEnd(0))
+    if por_dia.empty:
         st.info("Nenhum recebimento neste mês.")
         return
-    fmt = lambda v: "••••••" if ocultar else f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
-    pago = df[df["VALOR_PAGO"] > 0].copy()
-    total = pago["VALOR_PAGO"].sum()
-    titulos = pago[["DOC", "AGN", "PARC"]].drop_duplicates().shape[0]
-    clientes = pago["AGN"].nunique()
-    rot_mes = "MÊS ATUAL" if (ano, mes) == (hoje.year, hoje.month) else f"{meses[mes - 1].upper()}/{ano}"
-
-    por_dia =pago.groupby("DIA")["VALOR_PAGO"].sum().reset_index().sort_values("DIA", ascending=False)
+    total = float(por_dia["VALOR_PAGO"].sum())
+    maior = por_dia.loc[por_dia["VALOR_PAGO"].idxmax()]
+    md = pd.Timestamp(maior["DIA"])
+    por_dia = por_dia.sort_values("DIA", ascending=False)
     maximo = por_dia["VALOR_PAGO"].max() or 1
-    total_geral = total or 1
-    linhas = ""
-    for i, (_, row) in enumerate(por_dia.iterrows()):
-        ts = pd.Timestamp(row["DIA"])
-        opac = "1" if i < 3 else "0.6"
-        pct = row["VALOR_PAGO"] / total_geral * 100
-        linhas += (
-            '<div style="display:grid;grid-template-columns:36px 52px 38px minmax(0,1fr) 115px;'
-            'gap:6px;align-items:center;font-size:13px;padding:1px 0">'
-            f'<span style="background:rgba(79,163,224,0.15);color:#4fa3e0;font-size:10px;font-weight:700;'
-            f'border-radius:4px;padding:1px 4px;text-align:center;white-space:nowrap">{_DOW_PT[ts.weekday()]}</span>'
-            f'<span style="color:#e0e0e0;white-space:nowrap">{ts.day:02d}/{meses[ts.month - 1]}</span>'
-            f'<span style="color:#4fa3e0;font-size:11px;font-weight:600;text-align:right;white-space:nowrap">'
-            f'{"••" if ocultar else f"{pct:.2f}%"}</span>'
-            '<div style="height:12px;border-radius:3px;background:rgba(128,128,128,0.15);overflow:hidden">'
-            f'<div class="an-wipe" style="animation-delay:{min(i, 14) * 45}ms;width:{row["VALOR_PAGO"] / maximo * 100:.1f}%;height:100%;background:rgba(79,163,224,{opac})"></div></div>'
-            f'<span style="color:#ffffff;font-size:12px;text-align:right;white-space:nowrap">{fmt(row["VALOR_PAGO"])}</span>'
-            '</div>'
-        )
+    linhas = "".join(
+        _linha_dia(i, pd.Timestamp(r.DIA), "••" if ocultar else f"{r.VALOR_PAGO / total * 100:.2f}%", r.VALOR_PAGO / maximo * 100,
+                   _COR_RECEBIDO, "1" if i < 3 else "0.6", fmt(r.VALOR_PAGO))
+        for i, r in enumerate(por_dia.itertuples()))
     cabecalho = (
         '<div style="background:#252B3D;border:1px solid #3a4160;border-radius:8px;padding:10px 12px;margin-bottom:10px">'
         '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">'
         '<div style="display:flex;align-items:center;gap:8px">'
-        f'<span style="background:rgba(79,163,224,0.2);color:#4fa3e0;font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px">{rot_mes}</span>'
-        f'<span style="color:#e0e0e0;font-size:13px;font-weight:500">{inicio.day:02d}/{meses[inicio.month - 1]} a {fim.day:02d}/{meses[fim.month - 1]}</span></div>'
+        f'<span style="background:rgba({_COR_RECEBIDO},0.2);color:rgb({_COR_RECEBIDO});font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px">{_MESES_ABREV[mes - 1].upper()}/{ano}</span>'
+        '<span style="color:#e0e0e0;font-size:13px;font-weight:500">mês fechado</span></div>'
         '<span style="color:#8892A4;font-size:11px">por data da baixa no banco</span></div>'
-        '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:8px">'
-        f'<div><div style="color:#8892A4;font-size:11px">Recebido</div><div style="color:#00B050;font-size:15px;font-weight:600;white-space:nowrap">{fmt(total)}</div></div>'
-        f'<div><div style="color:#8892A4;font-size:11px">Títulos</div><div style="color:#fff;font-size:15px;font-weight:600;white-space:nowrap">{"••" if ocultar else titulos}</div></div>'
-        f'<div><div style="color:#8892A4;font-size:11px">Clientes</div><div style="color:#fff;font-size:15px;font-weight:600;white-space:nowrap">{"••" if ocultar else clientes}</div></div></div>'
-        '</div>'
+        '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:8px">'
+        f'<div><div style="color:#8892A4;font-size:11px">Total recebido</div><div style="color:#00B050;font-size:15px;font-weight:600;white-space:nowrap">{fmt(total)}</div></div>'
+        f'<div><div style="color:#8892A4;font-size:11px">Maior dia</div><div style="color:#fff;font-size:15px;font-weight:600;white-space:nowrap">'
+        f'{md.day:02d}/{_MESES_ABREV[md.month - 1]} · {fmt(maior["VALOR_PAGO"])}</div></div></div></div>'
         '<div style="color:#8892A4;font-size:11px;margin:0 0 6px">Recebimentos por dia (mais recente primeiro)</div>'
     )
     st.markdown(
@@ -650,79 +705,6 @@ def _recebido_mes(ocultar: bool, ano: int, mes: int):
         + linhas + '</div>'
         + '<div style="height:1px;background:#2a2a3a;margin:6px 0"></div>'
         + '<span style="color:#8892A4;font-size:11px">Data = dia da baixa (pagamento no banco)</span></div>',
-        unsafe_allow_html=True,
-    )
-
-
-def _tabela_recebimentos_dia(df: pd.DataFrame, ocultar: bool = False):
-    """Recebimentos a vencer agrupados pela data de crédito (D+1 útil), ordem cronológica."""
-    if "PRORROGADO" not in df.columns:
-        return
-
-    df_ab = df[df["SALDO_EM_ABERTO"].fillna(0) > 0].copy()
-    df_ab["PRORROGADO"] = pd.to_datetime(df_ab["PRORROGADO"], errors="coerce")
-    hoje = pd.Timestamp.today().normalize()
-
-    df_ab = df_ab[df_ab["PRORROGADO"] >= hoje].dropna(subset=["PRORROGADO"]).copy()
-    col_data = "PRORROGADO"
-    df_ab["_CREDITO"] = df_ab[col_data].apply(_credito_d1)
-
-    df_dia = (
-        df_ab.groupby("_CREDITO")["SALDO_EM_ABERTO"]
-        .sum()
-        .reset_index()
-        .rename(columns={"_CREDITO": "Data", "SALDO_EM_ABERTO": "Total"})
-        .sort_values("Data")
-    )
-
-    bloco_hoje = _bloco_recebimento_hoje(ocultar)
-    if df_dia.empty:
-        if bloco_hoje:
-            st.markdown('<div style="background:#1e1e2e;border-radius:8px;padding:12px 16px">' + bloco_hoje + '</div>',
-                        unsafe_allow_html=True)
-        st.info("Nenhum recebimento a vencer.")
-        return
-
-    total_geral = df_dia["Total"].sum() or 1
-    maximo = df_dia["Total"].max() or 1
-    opacidades = ["1","1","1","0.70","0.55","0.45","0.38","0.32","0.28","0.24",
-                  "0.21","0.18","0.16","0.14","0.12"]
-
-    linhas = ""
-    for i, (_, row) in enumerate(df_dia.iterrows()):
-        opac  = opacidades[i] if i < len(opacidades) else "0.12"
-        pct   = row["Total"] / total_geral * 100
-        barw  = row["Total"] / maximo * 100
-        ts    = pd.Timestamp(row["Data"])
-        dow   = _DOW_PT[ts.weekday()]
-        _meses = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"]
-        data_fmt = f"{ts.day:02d}/{_meses[ts.month-1]}"
-        pct_txt  = "••" if ocultar else f"{pct:.2f}%"
-        val_txt  = "••••••" if ocultar else (
-            f"{row['Total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        )
-        linhas += (
-            '<div style="display:grid;grid-template-columns:36px 52px 38px minmax(0,1fr) 115px;'
-            'gap:6px;align-items:center;font-size:13px;padding:1px 0">'
-            f'<span style="background:rgba(79,163,224,0.15);color:#4fa3e0;font-size:10px;'
-            f'font-weight:700;border-radius:4px;padding:1px 4px;text-align:center;white-space:nowrap">{dow}</span>'
-            f'<span style="color:#e0e0e0;white-space:nowrap">{data_fmt}</span>'
-            f'<span style="color:#4fa3e0;font-size:11px;font-weight:600;text-align:right;white-space:nowrap">{pct_txt}</span>'
-            f'<div style="height:12px;border-radius:3px;background:rgba(128,128,128,0.15);overflow:hidden">'
-            f'<div class="an-wipe" style="animation-delay:{min(i, 14) * 45}ms;width:{barw:.1f}%;height:100%;background:rgba(79,163,224,{opac})"></div></div>'
-            f'<span style="color:#ffffff;font-size:12px;text-align:right;white-space:nowrap">{val_txt}</span>'
-            '</div>'
-        )
-    st.markdown(
-        _CSS_GIRO
-        + f'<div style="{_ANIM_GIRO}background:#1e1e2e;border-radius:8px;padding:12px 16px;min-height:400px">'
-        + bloco_hoje
-        + f'<div style="max-height:{255 if bloco_hoje else 375}px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">'
-        + linhas
-        + '</div>'
-        + '<div style="height:1px;background:#2a2a3a;margin:6px 0"></div>'
-        + '<span style="color:#8892A4;font-size:11px">Data de crédito = vencimento + 1 dia útil</span>'
-        + '</div>',
         unsafe_allow_html=True,
     )
 
