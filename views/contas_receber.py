@@ -1,3 +1,5 @@
+from html import escape
+
 import streamlit as st
 import pandas as pd
 from utils.prazos import calcular_dias_prazo, formatar_dias_html, formatar_dias_unificado_html, nullar_zeros_dias, VERDE_DIAS, VERMELHO_DIAS
@@ -413,12 +415,13 @@ def _linha_dia(i: int, ts: pd.Timestamp, pct_txt: str, larg: float, rgb: str, op
 
 
 def _linha_hoje(hoje: pd.Timestamp, recebido: float, a_receber: float, pct_txt: str, maximo: float, ocultar: bool) -> str:
-    """Linha de hoje na lista: barra em dois tons (recebido hoje em verde, a receber hoje em azul) e o valor a receber."""
+    """Linha única de hoje na lista: barra em dois tons (recebido hoje em verde, a receber hoje em azul) e o total do dia; a dica traz os dois."""
     fmt = lambda v: "••••••" if ocultar else f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     pr, pa = recebido / maximo * 100, a_receber / maximo * 100
+    dica = escape(f"Recebido {fmt(recebido)} · A receber {fmt(a_receber)}", quote=True)
     return (
         '<div style="display:grid;grid-template-columns:36px 52px 38px minmax(0,1fr) 115px;gap:6px;align-items:center;'
-        'font-size:13px;padding:1px 0;background:rgba(27,173,166,0.10);border-radius:4px">'
+        f'font-size:13px;padding:1px 0;background:rgba(27,173,166,0.10);border-radius:4px" title="{dica}">'
         f'<span style="background:rgba(27,173,166,0.25);color:#1BADA6;font-size:10px;font-weight:700;border-radius:4px;'
         f'padding:1px 4px;text-align:center;white-space:nowrap">{_DOW_PT[hoje.weekday()]}</span>'
         f'<span style="color:#fff;font-weight:600;white-space:nowrap">{hoje.day:02d}/{_MESES_ABREV[hoje.month - 1]}</span>'
@@ -427,7 +430,7 @@ def _linha_hoje(hoje: pd.Timestamp, recebido: float, a_receber: float, pct_txt: 
         f'<div class="an-wipe" style="display:flex;width:{pr + pa:.1f}%;height:100%">'
         f'<span style="width:{(pr / (pr + pa) * 100) if pr + pa > 0 else 0:.1f}%;background:rgb({_COR_RECEBIDO})"></span>'
         f'<span style="flex:1;background:rgb({_COR_A_RECEBER})"></span></div></div>'
-        f'<span style="color:#ffffff;font-size:12px;text-align:right;white-space:nowrap">{fmt(a_receber)}</span>'
+        f'<span style="color:#ffffff;font-size:12px;text-align:right;white-space:nowrap">{fmt(recebido + a_receber)}</span>'
         '</div>'
     )
 
@@ -637,7 +640,15 @@ def _recebimentos_mes_atual(df: pd.DataFrame, ocultar: bool, ano: int, mes: int)
     hoje_receber = max(info["aberto"], 0.0) if info else 0.0
     hoje_recebido = (max(info.get("baixa_esperado", 0.0), 0.0) + max(info.get("nd", 0.0), 0.0)
                      + max(info.get("adiantamento", 0.0), 0.0)) if info else 0.0
-    if por_dia.empty and futuros.empty and not info:
+    # Hoje aparece numa linha só (recebido + a receber): sai das linhas de recebido e vira a linha de hoje. Em fim de semana não há
+    # crédito do dia; se entrou algo no banco, a linha de hoje mostra só o recebido.
+    _dias = pd.to_datetime(por_dia["DIA"]).dt.normalize() if not por_dia.empty else pd.Series([], dtype="datetime64[ns]")
+    rec_banco_hoje = float(por_dia.loc[_dias == hoje, "VALOR_PAGO"].sum()) if not por_dia.empty else 0.0
+    if not info:
+        hoje_recebido = rec_banco_hoje
+    tem_hoje = bool(info) or rec_banco_hoje > 0
+    por_dia_ant = por_dia[_dias < hoje] if not por_dia.empty else por_dia          # dias anteriores, sem hoje
+    if por_dia.empty and futuros.empty and not tem_hoje:
         st.markdown('<div style="background:#1e1e2e;border-radius:8px;padding:12px 16px">' + card + '</div>', unsafe_allow_html=True)
         st.info("Nenhum recebimento neste mês e nada a vencer.")
         return
@@ -645,13 +656,13 @@ def _recebimentos_mes_atual(df: pd.DataFrame, ocultar: bool, ano: int, mes: int)
     # Total do mês = o que já entrou + o que ainda entra até o fim do mês (data de crédito dentro do mês); para comparar os dois.
     no_mes = futuros[(futuros["Data"].dt.year == ano) & (futuros["Data"].dt.month == mes)] if not futuros.empty else futuros
     total_do_mes = total_mes + hoje_receber + float(no_mes["Total"].sum() if not no_mes.empty else 0)
-    maximo = max(por_dia["VALOR_PAGO"].max() if not por_dia.empty else 0, futuros["Total"].max() if not futuros.empty else 0,
+    maximo = max(por_dia_ant["VALOR_PAGO"].max() if not por_dia_ant.empty else 0, futuros["Total"].max() if not futuros.empty else 0,
                  hoje_receber + hoje_recebido) or 1
     pct = lambda v, t: "••" if ocultar else f"{v / t * 100:.2f}%"
     linhas_pass = "".join(
         _linha_dia(i, pd.Timestamp(r.DIA), pct(r.VALOR_PAGO, total_mes or 1), r.VALOR_PAGO / maximo * 100, _COR_RECEBIDO,
-                   "1" if (len(por_dia) - 1 - i) < 3 else "0.6", fmt(r.VALOR_PAGO))
-        for i, r in enumerate(por_dia.itertuples()))
+                   "1" if (len(por_dia_ant) - 1 - i) < 3 else "0.6", fmt(r.VALOR_PAGO))
+        for i, r in enumerate(por_dia_ant.itertuples()))
     linhas_fut = "".join(
         _linha_dia(i, pd.Timestamp(r.Data), pct(r.Total, total_fut), r.Total / maximo * 100, _COR_A_RECEBER,
                    _OPACIDADES_RANKING[i] if i < len(_OPACIDADES_RANKING) else "0.12", fmt(r.Total))
@@ -664,7 +675,7 @@ def _recebimentos_mes_atual(df: pd.DataFrame, ocultar: bool, ano: int, mes: int)
         + '<div class="cr-rec-scroll" style="position:relative;max-height:255px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">'
         + (_separador_dia("já recebido", "rgb(" + _COR_RECEBIDO + ")") + linhas_pass if linhas_pass else "")
         + _separador_dia(f"HOJE · {hoje:%d/%m}", "#1BADA6", "cr-rec-hoje")
-        + (_linha_hoje(hoje, hoje_recebido, hoje_receber, pct(hoje_receber, total_fut), maximo, ocultar) if info else "")
+        + (_linha_hoje(hoje, hoje_recebido, hoje_receber, pct(hoje_recebido + hoje_receber, total_do_mes or 1), maximo, ocultar) if tem_hoje else "")
         + linhas_fut
         + '</div>'
         + '<div style="height:1px;background:#2a2a3a;margin:6px 0"></div>'
@@ -674,12 +685,26 @@ def _recebimentos_mes_atual(df: pd.DataFrame, ocultar: bool, ano: int, mes: int)
         + '</div>',
         unsafe_allow_html=True,
     )
-    # A lista abre posicionada em HOJE (o recebido fica acima, na rolagem); o st.markdown não executa script.
+    # A lista abre SEMPRE com a linha de hoje no topo (o recebido fica acima, na rolagem), a cada atualização ou volta ao painel.
+    # O st.markdown não executa script; este roda num iframe. O texto leva um carimbo de tempo para o Streamlit recriar o iframe (e o
+    # script rodar) em toda execução. Como o Streamlit também recria a lista depois do primeiro desenho, o script vigia a página por
+    # alguns segundos e reposiciona toda lista nova; o ajuste se repete por 3 s (a altura das linhas ainda muda no início) e para assim que o
+    # usuário mexe na rolagem (a marca data-pos evita reposicionar a mesma lista).
+    import time
     import streamlit.components.v1 as components
     components.html(
-        "<script>(function(){var n=0,t=setInterval(function(){var d=window.parent.document,"
-        "s=d.querySelector('.cr-rec-scroll'),h=d.querySelector('.cr-rec-hoje');"
-        "if(s&&h){s.scrollTop=s.scrollTop+h.getBoundingClientRect().top-s.getBoundingClientRect().top-4;clearInterval(t);}if(++n>40)clearInterval(t);},100);})();</script>",
+        "<script>/*" + str(time.time()) + "*/(function(){var w=window.parent,d=w.document;"
+        "if(w.__crRecObs){w.__crRecObs.disconnect();}"
+        "function ir(forca){var s=d.querySelector('.cr-rec-scroll'),h=d.querySelector('.cr-rec-hoje');"
+        "if(!s||!h||(!forca&&s.getAttribute('data-pos')==='1'))return false;"
+        "var alvo=h.nextElementSibling||h;"
+        "var pos=function(){s.scrollTop=s.scrollTop+alvo.getBoundingClientRect().top-s.getBoundingClientRect().top-2;};"
+        "pos();s.setAttribute('data-pos','1');var t0=Date.now();"
+        "['wheel','touchstart','mousedown'].forEach(function(ev){s.addEventListener(ev,function(){s.setAttribute('data-user','1');},{passive:true});});"
+        "var iv=setInterval(function(){if(s.getAttribute('data-user')==='1'||Date.now()-t0>3000){clearInterval(iv);return;}pos();},120);return true;}"
+        "var obs=new w.MutationObserver(function(){ir(false);});obs.observe(d.body,{childList:true,subtree:true});w.__crRecObs=obs;"
+        "var n=0,t=setInterval(function(){if(ir(true)||++n>60)clearInterval(t);},100);"
+        "setTimeout(function(){obs.disconnect();},15000);})();</script>",
         height=0)
 
 
