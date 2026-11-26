@@ -397,7 +397,7 @@ def render_conteudo(df_geral: pd.DataFrame, df_agentes: pd.DataFrame, carregar_a
     _html_pend = None
     if not df_clientes.empty and "COD_AGENTE" in df_clientes.columns:
         _nomes_cli = {str(int(float(c))): str(n) for c, n in zip(df_clientes["COD_AGENTE"], df_clientes.get("NOME_AGENTE", df_clientes["COD_AGENTE"])) if pd.notna(c)}
-        _html_pend = html_notas_pendentes(list(_nomes_cli), nomes=_nomes_cli)
+        _html_pend = html_notas_pendentes(list(_nomes_cli))          # sem o nome do cliente embaixo da NF: os documentos ficam na mesma linha
     # O card das notas fica pequeno, numa terceira coluna ao lado dos gráficos (como na Situação Cliente); só existe se houver nota
     if _html_pend:
         _col_graf, _col_cons, _col_pend = st.columns([2, 3, 2.3])
