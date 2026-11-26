@@ -115,10 +115,16 @@ _ABERTOS = (0, 1, 2, 6)   # status de pendência ainda aberta (3 = regularizada:
 _GRAVIDADE = {"INVALIDO": 4, "VALIDANDO": 3, "NAO_ANEXADO": 2, "PENDENTE": 1, "OK": 0}
 # nomes iguais aos da Gestão documental do SyncProcess: Pendente (sem documento), Em validação, Inválido (prazo vencido, bloqueio ativo) e Válido
 ESTADO_ROTULO = {"INVALIDO": "Inválido", "VALIDANDO": "Em validação", "NAO_ANEXADO": "Pendente", "PENDENTE": "Pendente", "OK": "Válido"}
+
+
+def rotulo_estado(estado: str, bloqueando: bool = False) -> str:
+    """Texto do selo do documento. O que está em vermelho e bloqueando a nota pelo prazo vencido aparece como "Vencido"; o inválido
+    que não está bloqueando (recusado dentro do prazo) continua "Inválido"."""
+    return "Vencido" if estado == "INVALIDO" and bloqueando else ESTADO_ROTULO[estado]
 # documentos que aparecem como coluna (os que bloqueiam e o Pedido de venda, que aparece Válido), nesta ordem: (código no SyncProcess, nome na coluna larga, sigla na coluna estreita)
-_DOCS_ORDEM = [("CNH", "CNH do motorista", "CNH"), ("NFCANHOTO", "NF com canhoto", "NF"), ("CARTATEMP", "Carta de temperatura", "Cart."),
-               ("PEDVENDA", "Pedido de venda", "PV"), ("ACEITEPED", "Aceite do pedido", "Ac."), ("PEDCOMPRA", "Pedido de compra", "Ped."),
-               ("ACEITECARGA", "Aceite da carga", "Ac.C")]
+_DOCS_ORDEM = [("CNH", "CNH do motorista", "CNH"), ("NFCANHOTO", "NF com canhoto", "NF"), ("CARTATEMP", "Carta de temperatura", "Carta"),
+               ("PEDVENDA", "Pedido de venda", "PV"), ("ACEITEPED", "Aceite do pedido", "Aceite PV"), ("PEDCOMPRA", "Pedido de compra", "PC"),
+               ("ACEITECARGA", "Aceite da carga", "Ac. Carga")]
 
 
 def _estado_documento(status, doc_status=None) -> str:
@@ -218,7 +224,7 @@ def dica_documento(r, codigo, nome) -> str:
     if codigo == "ACEITEPED" and e == "OK":                       # aceite do pedido confirmado pelo cliente (WhatsApp)
         va = r.VALIDADOS.get(codigo)
         return f"{nome} · Aceite confirmado" + (f"\nConfirmado em {_quando(va)}" if pd.notna(va) else "")
-    linhas = [f"{nome} · {'não se aplica' if e is None else ESTADO_ROTULO[e]}"]
+    linhas = [f"{nome} · {'não se aplica' if e is None else rotulo_estado(e, r.BLOQUEANDO.get(codigo, False))}"]
     if e is not None:
         an, va = r.ANEXADOS.get(codigo), r.VALIDADOS.get(codigo)
         linhas.append(f"Incluído em {_quando(an)}" if pd.notna(an) else "Nenhum documento anexado")
@@ -288,10 +294,10 @@ def url_controle_venda(controle):
 
 
 _COR_BOLA = {"INVALIDO": "#E24B4A", "VALIDANDO": "#378ADD", "NAO_ANEXADO": "#9ca3af", "PENDENTE": "#9ca3af", "OK": "#22c55e"}
-_CSS_NOTAS = ("<style>.pn-box{display:block;container-type:inline-size}"
+_CSS_NOTAS = ("<style>.pn-box{display:flex;flex-direction:column;flex:1;container-type:inline-size}"
               ".pn-d{width:14px;height:14px;border-radius:50%;display:inline-block}"
               ".pn-nd{background:transparent;border:1px dashed #4b5563;box-sizing:border-box}"
-              "@container (max-width: 300px){.pn-l{display:none}}@container (min-width: 301px){.pn-c{display:none}}</style>")
+              "@container (max-width: 360px){.pn-l{display:none}}@container (min-width: 361px){.pn-c{display:none}}</style>")
 
 
 def html_notas_pendentes(codigo, nomes=None):
@@ -307,25 +313,24 @@ def html_notas_pendentes(codigo, nomes=None):
         return None
     cols = colunas_documentos(notas)
     n = len(cols)
-    col_nf = "110px" if nomes else "70px"
-    grade = f"grid-template-columns:{col_nf} repeat({n},18px) minmax(0,1fr);gap:7px;align-items:center"
-    cab = (f'<div style="display:grid;{grade};font-size:10px;color:#8892A4;padding-bottom:4px;border-bottom:1px solid #2a2a3a">'
-           f'<span></span>' + "".join(f'<span title="{escape(nome, quote=True)}">{escape(sg)}</span>' for _, nome, sg in cols)
-           + '<span style="text-align:right">Prazo</span></div>')
     cor_topo = "#E24B4A" if (notas["TIPO"] == "BLOQUEANTE").any() else "#378ADD"
+    estilo_quadro = {"INVALIDO": "background:rgba(226,75,74,.28);color:#f3a3a2", "VALIDANDO": "background:rgba(55,138,221,.25);color:#8ec2f5",
+                     "NAO_ANEXADO": "background:rgba(156,163,175,.22);color:#d1d5db", "PENDENTE": "background:rgba(156,163,175,.22);color:#d1d5db",
+                     "OK": "background:rgba(34,197,94,.16);color:#6fd69a"}
     linhas = ""
     for r in notas.itertuples(index=False):
         prazo = (f"<span class='pn-l'>{r.PRAZO.strftime('%d/%m/%Y %H:%M')}</span><span class='pn-c'>{r.PRAZO.strftime('%d/%m %H:%M')}</span>"
                  if pd.notna(r.PRAZO) else "—")
-        bolas = ""
-        for c, nome, _ in cols:
+        quadros = ""
+        for c, nome, sigla in cols:
             e_ = r.ESTADOS.get(c)
+            base = "display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;white-space:nowrap;"
             if e_ is None:
-                bolas += f'<span class="pn-d pn-nd" title="{escape(nome, quote=True)}: não se aplica"></span>'
+                continue                     # documento que não vale para a nota não aparece (a linha fica enxuta)
             else:
-                blq = r.BLOQUEANDO.get(c, False)
-                anel = "box-shadow:0 0 0 2px #1e1e2e,0 0 0 3.5px #E24B4A;" if blq else ""
-                bolas += f'<span class="pn-d" style="background:{_COR_BOLA[e_]};{anel}" title="{escape(dica_documento(r, c, nome), quote=True)}"></span>'
+                anel = "box-shadow:inset 0 0 0 1.5px #E24B4A;" if r.BLOQUEANDO.get(c, False) else ""
+                quadros += (f'<span style="{base}{estilo_quadro[e_]};{anel}" '
+                            f'title="{escape(dica_documento(r, c, nome), quote=True)}">{escape(sigla)}</span>')
         url = url_controle_venda(r.CONTROLE)
         if url:
             nf = (f'<a href="{url}" target="_blank" rel="noopener noreferrer" style="color:#fff;font-weight:500;text-decoration:none" '
@@ -336,20 +341,22 @@ def html_notas_pendentes(codigo, nomes=None):
             nome_cli = str(nomes.get(str(int(float(r.COD_CLIENTE))), "")).strip()
             nf = (f'<span style="display:block;min-width:0">{nf}<span style="display:block;color:#8892A4;font-size:10px;white-space:nowrap;overflow:hidden;'
                   f'text-overflow:ellipsis" title="{escape(nome_cli, quote=True)}">{escape(nome_cli)}</span></span>')
-        linhas += (f'<div style="display:grid;{grade};padding:3px 0;font-size:12px">{nf}{bolas}'
-                   f'<span style="color:#aaaaaa;text-align:right;white-space:nowrap">{prazo}</span></div>')
-    legenda = ("<span style='color:#ff6b6b'>●</span> inválido &nbsp;<span style='color:#6db3f5'>●</span> em validação &nbsp;"
-               "<span style='color:#9ca3af'>●</span> pendente &nbsp;<span style='color:#22c55e'>●</span> válido &nbsp;(anel vermelho = bloqueando)")
+        linhas += (f'<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #2a2a3a;font-size:12px">'
+                   f'<div style="flex-shrink:0;min-width:58px">{nf}</div>'
+                   f'<div style="flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:4px">{quadros}</div>'
+                   f'<span style="color:#aaaaaa;white-space:nowrap;flex-shrink:0">{prazo}</span></div>')
+    legenda = ("<span style='color:#f3a3a2'>■</span> vencido/inválido &nbsp;<span style='color:#8ec2f5'>■</span> em validação &nbsp;"
+               "<span style='color:#d1d5db'>■</span> pendente &nbsp;<span style='color:#6fd69a'>■</span> válido &nbsp;(contorno vermelho = bloqueando)")
     return (
         f"{_CSS_NOTAS}"
         f'<div style="background:#1e1e2e;border-radius:12px;border-top:4px solid {cor_topo};box-sizing:border-box;padding:16px 18px;'
-        f'width:100%;min-height:224px"><div class="pn-box">'
+        f'width:100%;min-height:224px;display:flex;flex-direction:column"><div class="pn-box">'
         f'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
         f'<span style="color:#e0e0e0;font-size:13px;font-weight:600">Notas pendentes de validação</span>'
-        f'<span style="font-size:11px;color:#8892A4">{legenda}</span></div>{cab}'
-        f'<div style="max-height:118px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>'
-        f'<div style="height:1px;background:#2a2a3a;margin:8px 0 6px"></div>'
-        f'<span style="color:#8892A4;font-size:11px">{len(notas)} nota(s) · passe o mouse na bolinha para ver o documento</span>'
+        f'<span style="font-size:11px;color:#8892A4">{legenda}</span></div>'
+        f'<div style="max-height:190px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div>'
+        f'<div style="margin-top:auto"><div style="height:1px;background:#2a2a3a;margin:8px 0 6px"></div>'
+        f'<span style="color:#8892A4;font-size:11px">{len(notas)} nota(s) · passe o mouse na bolinha para ver o documento</span></div>'
         f'</div></div>'
     )
 

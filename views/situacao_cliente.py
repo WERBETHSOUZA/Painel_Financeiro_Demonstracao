@@ -69,13 +69,14 @@ _COR_MOEDA = {"USD": "#378ADD", "EUR": "#1D9E75", "GBP": "#7F77DD"}
 
 
 def _html_situacao_titulos(a_vencer, vencido, qtd_a_vencer, qtd_vencidos) -> str:
-    """Rosca do saldo em aberto: a vencer x vencido, com valor e quantidade de títulos."""
+    """Rosca do saldo em aberto: a vencer x vencido. Card esticado na altura do Aging: rosca grande centralizada, legenda embaixo
+    (nome e quantidade de títulos, percentual e valor) e o total no fim."""
     a_vencer, vencido = max(float(a_vencer or 0), 0.0), max(float(vencido or 0), 0.0)
     total = a_vencer + vencido
     if total <= 0:
         return _bloco("Situação dos títulos", "R$", _COR_MI, "",
-                      '<div style="padding:30px 0">Sem saldo em aberto.</div>', 0.0,
-                      ocultar=False).replace("Total em reais", "Total em aberto")
+                      '<div style="padding:30px 0;text-align:center">Sem saldo em aberto.</div>', 0.0,
+                      ocultar=False, esticar=True).replace("Total em reais", "Total em aberto")
     pct_av = a_vencer / total * 100
     pct_v = 100 - pct_av
     cor_av, cor_v = "#1baf7a", "#E24B4A"
@@ -91,21 +92,21 @@ def _html_situacao_titulos(a_vencer, vencido, qtd_a_vencer, qtd_vencidos) -> str
             f'<span style="min-width:92px;text-align:right">{_formatar_numero(valor)}</span></div>'
         )
     corpo = (
-        '<div style="display:flex;align-items:center;gap:16px;padding:6px 0 4px">'
-        '<div style="position:relative;width:104px;height:104px;flex-shrink:0">'
-        f'<div class="an-rosca" style="width:104px;height:104px;border-radius:50%;'
+        '<div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:6px 0 4px">'
+        '<div style="position:relative;width:150px;height:150px;flex-shrink:0">'
+        f'<div class="an-rosca" style="width:150px;height:150px;border-radius:50%;'
         f'background:conic-gradient({cor_av} 0deg {graus:.2f}deg,{cor_v} {graus:.2f}deg 360deg);'
-        '-webkit-mask:radial-gradient(farthest-side,transparent 60%,black 60%);'
-        'mask:radial-gradient(farthest-side,transparent 60%,black 60%)"></div>'
+        '-webkit-mask:radial-gradient(farthest-side,transparent 62%,black 62%);'
+        'mask:radial-gradient(farthest-side,transparent 62%,black 62%)"></div>'
         '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">'
-        f'<span style="font-size:14px;font-weight:600">{pct_av_txt}</span>'
-        '<span style="font-size:10px;opacity:.7">a vencer</span></div></div>'
-        '<div style="flex:1;min-width:0">'
+        f'<span style="font-size:20px;font-weight:600">{pct_av_txt}</span>'
+        '<span style="font-size:11px;opacity:.7">a vencer</span></div></div>'
+        '<div style="width:100%">'
         + linha("A vencer", cor_av, pct_av, a_vencer, qtd_a_vencer)
         + linha("Vencido", cor_v, pct_v, vencido, qtd_vencidos)
         + '</div></div>'
     )
-    return _bloco("Situação dos títulos", "R$", _COR_MI, "", corpo, total, ocultar=False).replace("Total em reais", "Total em aberto")
+    return _bloco("Situação dos títulos", "R$", _COR_MI, "", corpo, total, ocultar=False, esticar=True).replace("Total em reais", "Total em aberto")
 
 
 def _painel_situacao_titulos_imagem(a_vencer, vencido, qtd_a_vencer, qtd_vencidos) -> dict:
@@ -471,27 +472,36 @@ def render(
     st.divider()
 
     # ── Aging de vencimento (barras) ─────────────────────────────────────────
-    st.subheader("Aging de Vencimento")
     # Cliente do Mercado Interno com nota pendente de validação: o gráfico das notas entra numa terceira coluna, ao lado do aging
     _html_pend = None if _so_externo else html_notas_pendentes(codigo_agente)
-    if _html_pend:
-        col_aging, col_sit, col_pend = st.columns([1, 0.9, 0.9])
-    else:
-        col_aging, col_sit = st.columns([1, 0.9])
-    _sit_col = df_cliente["SITUACAO"] if "SITUACAO" in df_cliente.columns else pd.Series(dtype=object)
-    qtd_titulos_a_vencer = int((_sit_col == "A VENCER").sum())
-
-    with col_aging:
-        if df_cliente.empty:
-            st.info("Sem títulos em aberto para montar o aging.")
+    # Os cards da linha (aging, situação dos títulos e notas pendentes) esticam até a altura do maior, o aging
+    _CSS_LINHA = ("<style>"
+                  ".st-key-sc_aging_row [data-testid='stHorizontalBlock']{align-items:stretch}"
+                  ".st-key-sc_aging_row [data-testid='stColumn']>[data-testid='stVerticalBlock'],"
+                  ".st-key-sc_aging_row [data-testid='stColumn'] [data-testid='stElementContainer'],"
+                  ".st-key-sc_aging_row [data-testid='stColumn'] [data-testid='stHtml']{height:100%}"
+                  ".st-key-sc_aging_row [data-testid='stColumn'] [data-testid='stHtml']>div{height:100%;box-sizing:border-box}"
+                  "</style>")
+    with st.container(key="sc_aging_row"):
+        st.markdown(_CSS_LINHA, unsafe_allow_html=True)
+        if _html_pend:
+            col_aging, col_sit, col_pend = st.columns([1, 0.9, 0.9])
         else:
-            st.html(_html_aging(_dados_aging(df_cliente)))
-    with col_sit:
-        if not df_cliente.empty:
-            st.html(_html_situacao_titulos(total_a_vencer, total_vencido, qtd_titulos_a_vencer, qtd_titulos_vencidos))
-    if _html_pend:
-        with col_pend:
-            st.html(_html_pend)
+            col_aging, col_sit = st.columns([1, 0.9])
+        _sit_col = df_cliente["SITUACAO"] if "SITUACAO" in df_cliente.columns else pd.Series(dtype=object)
+        qtd_titulos_a_vencer = int((_sit_col == "A VENCER").sum())
+
+        with col_aging:
+            if df_cliente.empty:
+                st.info("Sem títulos em aberto para montar o aging.")
+            else:
+                st.html(_html_aging(_dados_aging(df_cliente)))
+        with col_sit:
+            if not df_cliente.empty:
+                st.html(_html_situacao_titulos(total_a_vencer, total_vencido, qtd_titulos_a_vencer, qtd_titulos_vencidos))
+        if _html_pend:
+            with col_pend:
+                st.html(_html_pend)
 
     st.divider()
 

@@ -27,7 +27,7 @@ from utils.exporters import exportar_excel_abas_recebimentos
 from services.data_service import (carregar_controles_abertos_mi, carregar_grupo_credito_geral, carregar_grupo_credito_saldo_agente,
                                    carregar_lista_clientes, carregar_notas_pendentes_validacao, carregar_recebido_periodo_mi,
                                    carregar_pedidos_em_validacao, carregar_recebimento_hoje_mi, carregar_tratativas_pendentes)
-from utils.pendencias import _GRAVIDADE, ESTADO_ROTULO, _ha_dias, _quando, colunas_documentos, dica_documento, notas_pendentes_todas, url_busca_controles, url_controle_venda
+from utils.pendencias import _GRAVIDADE, ESTADO_ROTULO, rotulo_estado, _ha_dias, _quando, colunas_documentos, dica_documento, notas_pendentes_todas, url_busca_controles, url_controle_venda
 from views.contas_receber import formatar_moeda
 from views.relatorio_boleto_nao_gerado import _status_boleto
 from views.relatorio_desconto_financeiro_pendente import resumo_descontos_pendentes
@@ -584,7 +584,7 @@ def _grafico_notas(notas, filtro: str, cliente: str | None = None) -> str:
             else:
                 blq = r.BLOQUEANDO.get(c, False)
                 celulas += (f'<div class="rp-c rp-c-{e_}{" rp-c-blq" if blq else ""}" '
-                            f'title="{escape(dica_documento(r, c, nome), quote=True)}">{ESTADO_ROTULO[e_]}</div>')
+                            f'title="{escape(dica_documento(r, c, nome), quote=True)}">{rotulo_estado(e_, blq)}</div>')
         if pd.notna(r.ULTIMO_ANEXO):
             apos = bool(r.APOS_PRAZO)                       # algum documento ainda não válido entrou depois do prazo
             cor_ua = "#f5c070" if apos else "#6fd69a"        # amarelo = após o prazo, verde = no prazo
@@ -599,7 +599,7 @@ def _grafico_notas(notas, filtro: str, cliente: str | None = None) -> str:
                    f'<a href="{url_busca_controles(cli)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">{escape(cli)}</a></span>'
                    f'{celulas}{ultimo}<span class="rp-pz"{dica_em}>{emissao}</span><span class="rp-pz"{dica_pz}>{_prazo_colorido(r.PRAZO, prazo)}</span></div>')
     legenda = ('<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#8892a4;margin-top:10px">'
-               '<span><span style="color:#E24B4A">●</span> inválido</span><span><span style="color:#378ADD">●</span> em validação</span>'
+               '<span><span style="color:#E24B4A">●</span> vencido (bloqueando) ou inválido</span><span><span style="color:#378ADD">●</span> em validação</span>'
                '<span><span style="color:#9ca3af">●</span> pendente (sem documento)</span><span><span style="color:#22c55e">●</span> válido</span>'
                '<span><span style="border:1.5px solid #E24B4A;border-radius:3px;display:inline-block;width:12px;height:9px;vertical-align:-1px"></span> contorno vermelho = bloqueando (prazo vencido)</span>'
                '<span>Prazo: <span style="color:#f3a3a2">vencido/hoje</span> · <span style="color:#f5b090">falta 1 dia</span> · <span style="color:#f2d25c">2 a 3 dias</span></span>'
@@ -641,7 +641,8 @@ def _excel(notas, desbloquear) -> bytes:
                  "Situação da nota": {"BLOQUEANTE": "Bloqueante", "MANUAL": "Validação manual", "PEDIDO": "Pedido sem nota (em validação)"}.get(r.TIPO, "A vencer (sem anexo)")}
         for c, nome_doc, _ in cols_doc:
             e = r.ESTADOS.get(c)
-            linha[nome_doc] = "—" if e is None else ESTADO_ROTULO[e] + (" (bloqueando)" if r.BLOQUEANDO.get(c, False) else "")
+            linha[nome_doc] = "—" if e is None else (rotulo_estado(e, True) if e == "INVALIDO" and r.BLOQUEANDO.get(c, False)
+                                                     else ESTADO_ROTULO[e] + (" (bloqueando)" if r.BLOQUEANDO.get(c, False) else ""))
         for c, nome_doc, _ in cols_doc:
             linha[f"{nome_doc} · anexado em"] = _prazo_txt(r.ANEXADOS.get(c, pd.NaT))
         linha["Último anexo"] = _prazo_txt(r.ULTIMO_ANEXO)

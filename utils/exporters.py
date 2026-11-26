@@ -1192,7 +1192,8 @@ def adicionar_aba_ptax(xlsx_bytes: bytes, linhas: list[dict], desde, nome_aba: s
 def exportar_excel_abas_recebimentos(abas: list[dict]) -> bytes:
     """Excel com uma aba por item de `abas` (Recebimentos por Data). Cada aba tem nome, titulo (linha 1) e UMA tabela
     (df) ou vários `blocos` empilhados (resumos). Opções da tabela/bloco: moeda, verde (valor em verde/negrito), centro,
-    percentual (0,00%), situacao (coluna com "Em dia"/"Em atraso": verde/vermelho em negrito, sem fundo) e
+    percentual (0,00%), situacao (coluna com "Em dia"/"Em atraso": verde/vermelho em negrito, sem fundo; `cores_situacao`
+    troca os valores e as cores, ex.: {"Recebido": "00B050", "A receber": "1F6FC5"}), nota (linha 2 da aba) e
     total_na_ultima (última linha é o total, em negrito). Cabeçalho azul-marinho, zebra, e, nas abas de uma tabela,
     filtro e congelamento, como nos demais relatórios. Datas saem como dd/mm/aaaa."""
     from copy import copy
@@ -1234,8 +1235,9 @@ def exportar_excel_abas_recebimentos(abas: list[dict]) -> bytes:
                     cel.font = Font(bold=True, color="00B050")
                 if col in op.get("centro", ()):
                     cel.alignment = Alignment(horizontal="center")
-                if col == op.get("situacao") and cel.value in ("Em dia", "Em atraso"):
-                    cel.font = Font(bold=True, color="00B050" if cel.value == "Em dia" else "FF0000")
+                cores_sit = op.get("cores_situacao") or {"Em dia": "00B050", "Em atraso": "FF0000"}
+                if col == op.get("situacao") and cel.value in cores_sit:
+                    cel.font = Font(bold=True, color=cores_sit[cel.value])
             tem_data = df[col].map(lambda v: hasattr(v, "year")).any()
             maior = max((len(str(v)) for v in df[col] if v is not None and not hasattr(v, "year")), default=0)
             larguras[(ws.title, letra)] = max(larguras.get((ws.title, letra), 0),
@@ -1252,6 +1254,9 @@ def exportar_excel_abas_recebimentos(abas: list[dict]) -> bytes:
         ws = wb.create_sheet(aba["nome"])
         ws["A1"] = aba["titulo"]
         ws["A1"].font = Font(bold=True, size=13, color="1F3864")
+        if aba.get("nota"):
+            ws["A2"] = aba["nota"]
+            ws["A2"].font = Font(italic=True, size=10, color="595959")
         if "blocos" in aba:                              # aba de resumos: tabelas empilhadas
             linha = 3
             for bloco in aba["blocos"]:

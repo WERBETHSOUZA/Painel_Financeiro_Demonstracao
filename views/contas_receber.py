@@ -97,7 +97,7 @@ def _cards_aging_a_vencer(df: pd.DataFrame, ocultar: bool = False):
     maximo = max(resumo["SALDO"].max() or 1, vencido, pdd)
     linhas = ""
 
-    for _rotulo, _valor, _cor in (("Vencidos", vencido, "#E24B4A"), ("PDD", pdd, COR_PDD_TEXTO)):
+    for _rotulo, _valor, _cor in (("PDD", pdd, COR_PDD_TEXTO), ("Vencidos", vencido, "#E24B4A")):      # do mais antigo para o mais novo
         if _valor <= 0:
             continue
         vp = _valor / maximo * 100
@@ -540,6 +540,22 @@ def _excel_recebimentos(df_base: pd.DataFrame, ano: int, mes: int) -> bytes:
         g = _agrupa("_BANCO").sort_values("Valor", ascending=False)
         ar_banco = _com_total(g, "_BANCO", n_clientes)
         ar_banco.columns = ["Banco de Cobrança", "Títulos", "Clientes", "Valor a Receber", "% do Total"]
+    # Uma aba só: o recebido do mês (do mais recente ao mais antigo) e, abaixo, o a receber (do mais próximo ao mais distante)
+    partes = []
+    if not recebido.empty:
+        partes.append(pd.DataFrame({
+            "Data": recebido["Data Pagamento"], "Cód. Cliente": recebido["Cód. Cliente"], "Cliente": recebido["Cliente"],
+            "Banco": recebido["Banco"], "NF": recebido["NF"], "Parcela": recebido["Parcela"], "Vencimento": recebido["Vencimento"],
+            "Dias": recebido["Dias (Pagto - Vencto.)"], "Situação": "Recebido", "Valor": recebido["Valor Pago"]}))
+    if not a_receber.empty:
+        partes.append(pd.DataFrame({
+            "Data": a_receber["Data Crédito"].values, "Cód. Cliente": a_receber["Cód. Cliente"].values,
+            "Cliente": a_receber["Cliente"].values, "Banco": _banco_do_titulo(ab).values, "NF": a_receber["NF"].values,
+            "Parcela": a_receber["Parcela"].values, "Vencimento": a_receber["Vencimento"].values,
+            "Dias": a_receber["Dias p/ Vencer"].values, "Situação": "A receber", "Valor": a_receber["Saldo em Aberto"].values}))
+    unificado = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame()
+    if not unificado.empty:      # NF sempre como número quando for só dígitos (no Recebido vem como texto)
+        unificado["NF"] = unificado["NF"].map(lambda v: int(v) if str(v).strip().isdigit() else v)
     return exportar_excel_abas_recebimentos([
         {"nome": "Resumo", "titulo": f"Resumo - Mercado Interno - posição em {hoje:%d/%m/%Y}", "blocos": [
             {"titulo": f"Recebido por banco - {meses[mes - 1]}/{ano} ({inicio:%d/%m/%Y} a {fim:%d/%m/%Y})", "df": rec_banco,
@@ -552,12 +568,12 @@ def _excel_recebimentos(df_base: pd.DataFrame, ano: int, mes: int) -> bytes:
              "moeda": ("Valor a Receber",), "percentual": ("% do Total",), "centro": ("Títulos", "Clientes"),
              "total_na_ultima": True},
         ]},
-        {"nome": "A receber", "titulo": f"A receber - Mercado Interno - posição em {hoje:%d/%m/%Y}", "df": a_receber,
-         "moeda": ("Saldo em Aberto",), "centro": ("Parcela", "Dias p/ Vencer")},
-        {"nome": "Recebido",
-         "titulo": f"Recebido - Mercado Interno - {meses[mes - 1]}/{ano} ({inicio:%d/%m/%Y} a {fim:%d/%m/%Y})",
-         "df": recebido, "moeda": ("Valor Pago",), "verde": ("Valor Pago",),
-         "centro": ("Parcela", "Dias (Pagto - Vencto.)", "Situação"), "situacao": "Situação"},
+        {"nome": "Recebimentos",
+         "titulo": (f"Recebimentos - Mercado Interno - {meses[mes - 1]}/{ano} ({inicio:%d/%m/%Y} a {fim:%d/%m/%Y}) "
+                    f"e a receber - posição em {hoje:%d/%m/%Y}"),
+         "nota": "Dias: no Recebido, pagamento menos vencimento (positivo = pago depois); no A receber, dias para vencer.",
+         "df": unificado, "moeda": ("Valor",), "centro": ("Parcela", "Dias", "Situação"), "situacao": "Situação",
+         "cores_situacao": {"Recebido": "00B050", "A receber": "1F6FC5"}},
     ])
 
 
@@ -584,7 +600,7 @@ def _card_recebimentos_dia(df: pd.DataFrame, ocultar: bool = False):
         _recebimentos_mes_fechado(ocultar, ano, mes)
     botao_exportar_excel(lambda: _excel_recebimentos(df, ano, mes), f"Recebimentos_MI_{ano}-{mes:02d}.xlsx",
                          key="cr_export_recebimentos",
-                         help="Três abas: Resumo, A receber (títulos em aberto) e Recebido (só o que entrou no banco no mês selecionado)")
+                         help="Duas abas: Resumo e Recebimentos (o que entrou no banco no mês selecionado e o a receber, na mesma aba)")
 
 
 def _recebido_por_dia(inicio: pd.Timestamp, fim: pd.Timestamp) -> pd.DataFrame:

@@ -128,7 +128,20 @@ def _linha(rotulo: str, segmentos: list, total: float, maximo: float, dica: str 
 
 
 def _bloco(nome: str, tag: str, cor_tag: str, cabecalho: str, corpo: str, total: float,
-           ocultar: bool = None, abreviar: bool = False) -> str:
+           ocultar: bool = None, abreviar: bool = False, esticar: bool = False) -> str:
+    """esticar: o card preenche a altura da coluna: o corpo fica centralizado no meio e o total encostado no fim."""
+    if esticar:
+        return (
+            f'<div style="background:{_FUNDO};border:{_BORDA};border-radius:12px;padding:12px 14px;display:flex;flex-direction:column">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;'
+            f'font-size:17px;font-weight:600;margin-bottom:8px"><span>{nome}</span>'
+            f'<span style="font-size:12px;padding:2px 9px;border-radius:4px;font-weight:500;'
+            f'background:{cor_tag}22;color:{cor_tag}">{tag}</span></div>'
+            f'<div style="flex:1;display:flex;flex-direction:column;justify-content:center">{cabecalho}{corpo}</div>'
+            f'<div style="display:flex;justify-content:space-between;font-size:15px;font-weight:600;'
+            f'margin-top:8px;padding-top:7px;border-top:{_BORDA}"><span>Total em reais</span>'
+            f'<span>R$ {(_abrev if abreviar else _completo)(total, ocultar)}</span></div></div>'
+        )
     return (
         f'<div style="background:{_FUNDO};border:{_BORDA};border-radius:12px;padding:12px 14px">'
         f'<div style="display:flex;justify-content:space-between;align-items:center;'
