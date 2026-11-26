@@ -233,14 +233,14 @@ def carregar_pedidos_em_validacao():
 @st.cache_data(show_spinner=False)
 def carregar_tratativas_pendentes():
     """Reclamações de clientes em andamento, cada uma na sua etapa (COD_CLIENTE, CONTROLE, NF, REGISTRO, PROCEDE, QUALIDADE_CONCLUIDA, TIPO, NF_DEVOLUCAO,
-    VALOR, APROVACAO, DEFINIDA, APROVADA, RECLAMACAO), inventadas."""
+    VALOR, TOTAL_NF, APROVACAO, DEFINIDA, APROVADA, RECLAMACAO), inventadas."""
     hoje = pd.Timestamp(date.today()).replace(hour=10, minute=30)
     d = pd.Timedelta
     nt = pd.NaT
     def linha(cod, ctrl, nf, reg, proc, qual, tipo, valor, aprov, defin, aprovada, rec):
         return {"COD_CLIENTE": cod, "CONTROLE": ctrl, "NF": nf, "REGISTRO": hoje - d(days=reg), "PROCEDE": proc,
                 "QUALIDADE_CONCLUIDA": nt if qual is None else hoje - d(days=qual), "TIPO": tipo, "NF_DEVOLUCAO": None, "VALOR": valor,
-                "APROVACAO": aprov, "DEFINIDA": nt if defin is None else hoje - d(days=defin),
+                "TOTAL_NF": round((valor or 3000.0) * 1.8 + 1000, 2), "APROVACAO": aprov, "DEFINIDA": nt if defin is None else hoje - d(days=defin),
                 "APROVADA": nt if aprovada is None else hoje - d(days=aprovada), "RECLAMACAO": rec}
     df = pd.DataFrame([
         linha(1001, "CTV-2026-000762", "48001", 27, 1, 27, 3, 9900.0, 681, 26, None, 221),

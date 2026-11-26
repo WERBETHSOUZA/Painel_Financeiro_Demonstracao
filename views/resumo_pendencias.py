@@ -400,7 +400,7 @@ def _para_desbloquear(notas) -> pd.DataFrame | None:
 
 
 def _html_para_desbloquear(df) -> str:
-    cabeca = ('<div style="margin-bottom:8px"><div style="color:#e0e0e0;font-size:14px;font-weight:600">Para desbloquear</div>'
+    cabeca = ('<div style="margin-bottom:8px"><div style="color:#e0e0e0;font-size:14px;font-weight:600">Para desbloquear sem pendências</div>'
               '<div style="font-size:11px;color:#8892a4;margin-top:2px">Bloqueados no crédito, sem pendência documental · '
               f'{0 if df is None else len(df)} cliente(s) com controle aberto</div></div>')
     if df is None:
@@ -458,8 +458,8 @@ def _situacao_reclamacao(r, saldo_nf, hoje: pd.Timestamp):
 def _html_reclamacoes_pendentes(df, cliente: str | None, nomes: dict, df_cr: pd.DataFrame | None = None, sem_valores: bool = False) -> str:
     """Tabela das reclamações de clientes no SyncProcess, com a etapa em que cada uma está numa coluna só (Situação, em duas linhas: a etapa e a data).
     Ordem: aprovação pendente (a mais antiga na frente), tratativa a definir, qualidade pendente, aprovada falta aplicar, qualidade recusada e concluídas
-    (da mais recente à mais antiga); 8 linhas à vista, o resto na barra de rolagem. Saldo NF = o que ainda está em aberto da NF no Contas a Receber
-    (zerado = baixada = Concluída, em qualquer etapa). sem_valores=True (Comercial): sem as colunas Desconto e Saldo NF. Sem dados ou sem banco: não aparece."""
+    (da mais recente à mais antiga); 8 linhas à vista, o resto na barra de rolagem. Saldo em Aberto = o que ainda está em aberto da NF no Contas a Receber
+    (zerado = baixada = Concluída, em qualquer etapa). Colunas de valor: Valor NF (total da venda), Desconto e Saldo em Aberto; sem_valores=True: sem elas. Sem dados ou sem banco: não aparece."""
     if df is None or df.empty:
         return ""
     d = df.copy()
@@ -490,10 +490,10 @@ def _html_reclamacoes_pendentes(df, cliente: str | None, nomes: dict, df_cr: pd.
             chave = chave.value
         itens.append((ordem, chave, r, sd, texto, cor, detalhe))
     itens.sort(key=lambda x: (x[0], x[1]))
-    grade = f"grid-template-columns:54px minmax(0,1fr) 70px {'' if sem_valores else '82px 88px '}48px 190px"
+    grade = f"grid-template-columns:54px minmax(0,1fr) 76px {'' if sem_valores else '100px 96px 108px '}48px 190px"
     topo = (f'<div class="rp-rq rp-qh" style="{grade}"><span style="text-align:left">NF venda</span>'
-            '<span style="text-align:left">Cliente</span><span style="text-align:left">Tratativa</span>' + ('' if sem_valores else '<span class="rp-pz" title="Valor fiscal autorizado do desconto ou da devolução (só existe depois que a tratativa é definida)">Desconto</span>'
-            '<span class="rp-pz" title="Saldo em aberto da NF no Contas a Receber (zerado = baixada)">Saldo NF</span>') + '<span class="rp-pz">Aprov.</span><span style="text-align:left">Situação</span></div>')
+            '<span style="text-align:left">Cliente</span><span style="text-align:left">Tratativa</span>' + ('' if sem_valores else '<span class="rp-pz" title="Valor total da venda (controle de venda no SyncProcess)">Valor NF</span><span class="rp-pz" title="Valor fiscal autorizado do desconto ou da devolução (só existe depois que a tratativa é definida)">Desconto</span>'
+            '<span class="rp-pz" title="Saldo em aberto da NF no Contas a Receber (zerado = baixada)">Saldo em Aberto</span>') + '<span class="rp-pz">Aprov.</span><span style="text-align:left">Situação</span></div>')
     linhas, n_conc = "", 0
     for ordem, _, r, sd, texto, cor, detalhe in itens:
         n_conc += ordem == 5
@@ -503,6 +503,8 @@ def _html_reclamacoes_pendentes(df, cliente: str | None, nomes: dict, df_cr: pd.
                    f'title="Abrir Tratativa e Execução no SyncProcess">{nf}</a>' if url else nf)
         tipo = "Devolução" if pd.notna(r.TIPO) and int(r.TIPO) == 3 else ("Desconto" if pd.notna(r.TIPO) and int(r.TIPO) == 2 else "—")
         valor = formatar_moeda(float(r.VALOR)) if pd.notna(r.VALOR) else "—"
+        _tot = getattr(r, "TOTAL_NF", None)
+        total_nf = formatar_moeda(float(_tot)) if _tot is not None and pd.notna(_tot) else "—"
         nome = nomes.get(r.COD, f"Cliente {r.COD}")
         saldo_html = ("—" if sd is None else f'<span style="color:#6fd69a">{formatar_moeda(0)}</span>' if abs(sd) < 0.005
                       else f'<span style="color:#f5c070">{formatar_moeda(sd)}</span>')
@@ -510,12 +512,12 @@ def _html_reclamacoes_pendentes(df, cliente: str | None, nomes: dict, df_cr: pd.
                f'<span style="color:#8892a4;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{escape(detalhe, quote=True)}">{escape(detalhe)}</span></span>')
         linhas += (f'<div class="rp-rq rp-qr" style="{grade}"><span>{nf_html}</span>'
                    f'<span class="rp-rcl" title="{escape(nome, quote=True)}">{escape(nome)}</span><span style="color:#d1d5db;font-size:13px">{tipo}</span>'
-                   + (f'' if sem_valores else f'<span class="rp-pz">{valor}</span><span class="rp-pz">{saldo_html}</span>') + f'<span class="rp-pz">#{int(r.APROVACAO) if pd.notna(r.APROVACAO) else "—"}</span>'
+                   + (f'' if sem_valores else f'<span class="rp-pz" style="color:#aab2c5">{total_nf}</span><span class="rp-pz">{valor}</span><span class="rp-pz">{saldo_html}</span>') + f'<span class="rp-pz">#{int(r.APROVACAO) if pd.notna(r.APROVACAO) else "—"}</span>'
                    f'{sit}</div>')
     cabeca = ('<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
               '<span style="color:#e0e0e0;font-size:14px;font-weight:600">Reclamações · andamento</span>'
               f'<span style="font-size:11px;color:#8892a4">{len(itens) - n_conc} em andamento · {n_conc} concluída(s) nos últimos 30 dias</span></div>')
-    return _CSS_RQ + f'<div class="rp-lista" style="border-top-color:#378ADD;height:100%;box-sizing:border-box">{cabeca}<div style="overflow-x:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e"><div style="min-width:{550 if sem_valores else 790}px">{topo}<div style="max-height:352px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div></div></div></div>'   # 8 linhas à vista; largura mínima + rolagem lateral em tela pequena
+    return _CSS_RQ + f'<div class="rp-lista" style="border-top-color:#378ADD;height:100%;box-sizing:border-box">{cabeca}<div style="overflow-x:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e"><div style="min-width:{550 if sem_valores else 900}px">{topo}<div style="max-height:352px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a3a4a #1e1e2e">{linhas}</div></div></div></div>'   # 8 linhas à vista; largura mínima + rolagem lateral em tela pequena
 
 
 def _prazo_colorido(ts, texto: str) -> str:
@@ -869,7 +871,7 @@ def render(df_cr: pd.DataFrame, documental: bool = False, df_grupo_agentes=None,
                     ".st-key-rp_par [data-testid='stColumn'] [data-testid='stHtml'],.st-key-rp_par [data-testid='stColumn'] [data-testid='stHtml']>div{height:100%}"
                     "@media (max-width:1400px){.st-key-rp_par [data-testid='stHorizontalBlock']{flex-wrap:wrap}"
                     ".st-key-rp_par [data-testid='stColumn']{min-width:100% !important}}</style>")   # tela pequena: um card embaixo do outro
-            c_desb, c_recl = st.columns([4, 6], gap="small")
+            c_desb, c_recl = st.columns([3, 7], gap="small")
             c_desb.html(_CSS + _CSS_RQ + _html_para_desbloquear(desbloquear))
             c_recl.html(_CSS + html_recl)
     else:
