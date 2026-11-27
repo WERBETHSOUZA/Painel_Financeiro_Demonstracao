@@ -26,16 +26,30 @@ _DESCRICOES_ERRO = {
        "Não é possível lançar Contas a Pagar para favorecidos do tipo Cliente"
     
     ),
+    "ERRO ACAO BAIXA EMPRESTIMO": (
+        "A baixa financeira de empréstimo (Movimento Financeiro) deve usar a ação 425 (Geral - Baixa de Financiamento)."
+    ),
+    "ERRO CLASSE 271 AGENTE NAO EMPRESTIMO": (
+        "A classe 271 (Juros s/ Empréstimos e Financiamentos) só vale para agentes da conta contábil Empréstimos; este agente não está nesse grupo."
+    ),
+    "ERRO BAIXA ND A PAGAR": (
+        "A baixa de ND a pagar (lançamento 437) deve usar a ação 439 (Geral - Baixas no Contas a Pagar ND) nas duas pernas: fornecedor e banco."
+    ),
+    "ERRO BAIXA ND A RECEBER": (
+        "A baixa financeira de ND a receber (lançamento 435) deve usar a ação 434 (Geral - Baixa ND, contas a receber), e não a 944."
+    ),
+    "ERRO CLASSE JUROS EMPRESTIMO": (
+        "A baixa de empréstimo deve ter a classe 271 (Juros s/ Empréstimos e Financiamentos) no rateio."
+    ),
 }
 
 
 def _obter_obs(categoria: str) -> str:
     if not categoria:
         return ""
-    for chave, descricao in _DESCRICOES_ERRO.items():
-        if chave in str(categoria).upper():
-            return descricao
-    return str(categoria)
+    # o lançamento pode ter mais de uma categoria (separadas por " | "): mostra a descrição de todas
+    achadas = [descricao for chave, descricao in _DESCRICOES_ERRO.items() if chave in str(categoria).upper()]
+    return " ".join(achadas) if achadas else str(categoria)
 
 
 def obter_obs_inconsistencia(categoria: str) -> str:

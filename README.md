@@ -68,7 +68,7 @@ projeto/
 │
 ├── query/
 │   ├── QUERY_APS_VENCIDAS.sql          # APs vencidas (painel fora do menu)
-│   ├── QUERY_APS_ERRO.sql              # Inconsistências de lançamento
+│   ├── inconsistencias/                # Inconsistências de lançamento: uma consulta por regra (INC_01 a INC_04) + INC_DETALHE
 │   ├── RELATORIO_APPROVO.sql           # Relatório de aprovadores
 │   ├── QUERY_CONTAS_APAGAR.sql         # Contas a pagar
 │   ├── QUERY_BOLETOS_DDA.sql           # Boletos DDA
@@ -194,7 +194,7 @@ A barra lateral abre **expandida**; o botão « a **recolhe** para uma coluna s�
 **Mercado interno x externo e Classificação:** definidos pela **ação** do movimento (não pelo país do cliente). Ações `161`, `170` = Mercado Interno (`MI`); `162`, `171` = Mercado Externo (`ME`); `262` = NF Complementar ME; `288` = NF Complementar MI; `326` = Sucatas. A coluna `CLASSIFICACAO` (usada na Situação Cliente) reflete esse mesmo agrupamento.
 
 #### ❌ Inconsistências
-Exibe lançamentos com erros identificados no processamento (categoria de erro por classe, ação/segmento e tipo de favorecido). **Abre direto com todos os dados, sem filtros** (igual ao Contas a Receber), com cards de total e por categoria, tabela e Excel. Envio automático de e-mail para os solicitantes, com tabela formatada no corpo (incluindo Filial, Data e Valor) e planilha `.xlsx` em anexo com as mesmas colunas.
+Exibe os lançamentos do Contas a Pagar e do Movimento Financeiro que quebram alguma regra. **Uma consulta por regra** em `query/inconsistencias/` (`INC_01_FAVORECIDO_CLIENTE`, `INC_02_ACAO_SEGMENTO`, `INC_03_BAIXA_EMPRESTIMO` (baixa financeira de empréstimo, no Movimento Financeiro, que deve usar a ação 425), `INC_04_CLASSE_ADIANTAMENTO` (ação 55 só com as classes 364 e 1721), `INC_05_CLASSE_271_AGENTE` (classe 271 só para agente da conta contábil Empréstimos)), todas com a mesma saída; `INC_DETALHE` completa só as linhas com erro (classe, centro de custo, AP, conta do agente e solicitante). `carregar_aps_erro()` junta as regras (um lançamento com mais de uma regra mostra as categorias separadas por `|`). **Para acrescentar uma regra:** copie uma `INC_0*.sql`, troque a condição e inclua o nome em `_REGRAS_INCONSISTENCIA` (`services/data_service.py`) e a descrição em `services/email_service.py`. **Abre direto com todos os dados, sem filtros** (igual ao Contas a Receber), com cards de total e por categoria, tabela e Excel. Envio automático de e-mail para os solicitantes, com tabela formatada no corpo (incluindo Filial, Data e Valor) e planilha `.xlsx` em anexo com as mesmas colunas.
 
 ### 🏛️ Tesouraria
 

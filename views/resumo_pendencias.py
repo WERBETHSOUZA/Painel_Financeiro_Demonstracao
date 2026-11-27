@@ -11,6 +11,7 @@ Só aparece no menu de quem está no grupo fixo "Resumo Pendências" (tela Acess
 """
 
 import base64
+import calendar
 import datetime
 import re
 import threading
@@ -38,10 +39,11 @@ _AMARELO, _AZUL, _VERMELHO, _VERDE, _CINZA = "#F59E0B", "#378ADD", "#E24B4A", "#
 _CSS = """<style>
 .rp-grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:4px 0 14px}
 .rp-t{font-size:1.05rem;font-weight:600;color:#fafafa;margin:0 0 8px 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rp-card{background:#1e1e2e;border-radius:12px;border-top:4px solid;box-sizing:border-box;padding:9px 16px;height:184px;
+.rp-card{background:#1e1e2e;border-radius:12px;border-top:4px solid;box-sizing:border-box;padding:9px 16px;height:212px;
  display:flex;flex-direction:column;overflow:hidden}
-.rp-top{display:flex;align-items:baseline;justify-content:space-between;font-size:11px;color:#8892a4}
-.rp-top b{font-size:28px;color:#fff;line-height:1.1}.rp-top b i{font-style:normal;font-size:11px;font-weight:400;margin-left:4px}
+.rp-top{display:flex;align-items:baseline;gap:8px;white-space:nowrap;overflow:hidden}
+.rp-top b{font-size:40px;line-height:1}.rp-top .rp-un{font-size:14px;font-weight:700;color:#fff}
+.rp-ds{font-size:12px;color:#8892a4;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rp-ln{height:1px;background:#2a2a3a;margin:5px 0}
 .rp-nm{font-size:19px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rp-sb{font-size:13px;margin-top:2px}
@@ -109,8 +111,8 @@ def _card(titulo: str, rotulo: str, numero, unidade: str, cor: str, destaque: st
     meio = (_ticker(chave, itens, cor) if itens
             else f'<div class="rp-nm">{destaque}</div><div class="rp-sb" style="color:{cor}">{sub}</div>')
     return (f'<div><div class="rp-t" title="{escape(titulo)}">{escape(titulo)}</div>'
-            f'<div class="rp-card" style="border-color:{cor}"><div class="rp-top"><span>{escape(rotulo)}</span>'
-            f'<b>{numero}<i style="color:{cor}">{escape(unidade)}</i></b></div><div class="rp-ln"></div>'
+            f'<div class="rp-card" style="border-color:{cor}"><div class="rp-top"><b style="color:{cor}">{numero}</b>'
+            f'<span class="rp-un">{escape(unidade)}</span></div><div class="rp-ds">{escape(rotulo)}</div><div class="rp-ln"></div>'
             f'{meio}'
             f'<div style="flex:1"></div><div class="rp-ln"></div><div class="rp-mt">{rodape}</div></div></div>')
 
@@ -143,11 +145,11 @@ def _card_descontos(df_cr: pd.DataFrame) -> str:
     pend, erros = desc["pendentes"], desc["erros"]
     cor = "#ef4444" if erros else _AMARELO if pend else _VERDE
     if not pend:
-        return _card(titulo, "Pendentes", 0, "título(s)", cor, "Tudo aplicado", "&nbsp;", "nenhum desconto a lançar")
+        return _card(titulo, "Pendentes de desconto", 0, "título(s)", cor, "Tudo aplicado", "&nbsp;", "nenhum desconto a lançar")
     clientes = desc["por_cliente"][:10]
     itens = [(c, f"{q:02d} {_plural(q, 'título', 'títulos')}", None) for c, q in zip(_nomes_cheios([x[0] for x in clientes]), [x[1] for x in clientes])]
     rodape = f'{desc["clientes"]} cliente(s)' + (f' · <span style="color:#ef4444">{erros} com erro</span>' if erros else "")
-    return _card(titulo, "Pendentes", pend, "título(s)", cor, "", "", rodape, itens=itens, chave="rpkd")
+    return _card(titulo, "Pendentes de desconto", pend, "título(s)", cor, "", "", rodape, itens=itens, chave="rpkd")
 
 
 def _card_boletos(df_cr: pd.DataFrame) -> str:
@@ -194,10 +196,10 @@ def _card_notas(notas) -> str:
     if notas is None:
         return _indisponivel(titulo)
     if notas.empty:
-        return _card(titulo, "Pendentes", 0, "nota(s)", _VERDE, "Nenhuma pendência", "&nbsp;", "todas as notas validadas")
+        return _card(titulo, "Pendentes de validação", 0, "nota(s)", _VERDE, "Nenhuma pendência", "&nbsp;", "todas as notas validadas")
     notas = notas[~notas["TIPO"].isin(["A_VENCER", "PEDIDO"])]      # o card conta só bloqueante e validação manual de NOTAS; a vencer e pedidos ficam no quadro
     if notas.empty:
-        return _card(titulo, "Pendentes", 0, "nota(s)", _VERDE, "Nenhuma pendência", "&nbsp;", "todas as notas validadas")
+        return _card(titulo, "Pendentes de validação", 0, "nota(s)", _VERDE, "Nenhuma pendência", "&nbsp;", "todas as notas validadas")
     bloq = notas[notas["TIPO"] == "BLOQUEANTE"]
     man = len(notas) - len(bloq)
     clientes = notas["COD_CLIENTE"].nunique()
@@ -213,7 +215,7 @@ def _card_notas(notas) -> str:
             itens.append((curto, sub, _VERMELHO))
         else:
             itens.append((curto, f"{nm} em validação manual", _AZUL))
-    return _card(titulo, "Pendentes", len(notas), "nota(s)", cor, "", "",
+    return _card(titulo, "Pendentes de validação", len(notas), "nota(s)", cor, "", "",
                  f"{len(bloq)} bloqueante(s) · {man} manual(is) · {clientes} cliente(s)", itens=itens, chave="rpkn")
 
 
@@ -241,7 +243,7 @@ def _card_esperado_recebido(df_cr: pd.DataFrame, ocultar: bool = False) -> str:
     pct_txt = f"{pct:.2f}".replace(".", ",")
     rodape = f"faltam {faltam} título(s) · {moeda(max(valor_esp - valor_rec, 0.0))} · só entrada no banco" if info else "sem crédito previsto hoje · só entrada no banco"
     return (f'<div><div class="rp-t" title="{titulo}">{titulo}</div><div class="rp-card" style="border-color:{_VERDE}">'
-            f'<div class="rp-top"><span>Hoje, {hoje:%d/%m/%Y}</span><b>{pct_txt}<i style="color:{_VERDE}">%</i></b></div><div class="rp-ln"></div>'
+            f'<div class="rp-top"><b style="color:{_VERDE}">{pct_txt}%</b><span class="rp-un">recebido</span></div><div class="rp-ds">do esperado hoje · {hoje:%d/%m/%Y}</div><div class="rp-ln"></div>'
             f'<div class="rp-mt">Esperado · {esperado} título(s)</div><div class="rp-vl">{moeda(valor_esp)}</div>'
             f'<div class="rp-barra"><div style="width:{pct:.1f}%;background:{_VERDE}"></div></div>'
             f'<div class="rp-mt">Recebido no banco · {recebido} título(s)</div><div class="rp-vl" style="color:{_VERDE}">{moeda(valor_rec)}</div>'
@@ -765,6 +767,93 @@ def _desenhar_cards(cards: list, df_cr: pd.DataFrame) -> None:
                           f"Boletos a Gerar {datetime.date.today():%d-%m-%Y}.xlsx", st.session_state.get("_rp_xls_bol", False))
 
 
+_COR_REGRA_INC = {"ERRO TIPO FAVORECIDO CLIENTE": ("rgba(226,75,74,.25)", "#f3a3a2"), "ERRO ACAO SEGMENTO": ("rgba(186,117,23,.25)", "#f5c070"),
+                  "ERRO ACAO BAIXA EMPRESTIMO": ("rgba(74,127,181,.25)", "#8ec2f5"), "ERRO CLASSE ADIANTAMENTO": ("rgba(123,104,181,.25)", "#c3b8ee"),
+                  "ERRO CLASSE 271 AGENTE NAO EMPRESTIMO": ("rgba(27,173,166,.25)", "#7fdcd7"),
+                  "ERRO BAIXA ND A PAGAR": ("rgba(212,83,126,.25)", "#f2a5c0"), "ERRO BAIXA ND A RECEBER": ("rgba(143,191,63,.22)", "#c5e08f")}
+_LIN_INC, _SEG_INC, _MAX_INC, _VISTAS_INC = 30, 3, 15, 3      # altura de uma linha (px), segundos por linha, máximo de lançamentos no giro e linhas à vista
+
+
+def _detalhe_curto(r: dict) -> str:
+    """Detalhe do erro em poucas palavras para a linha do card (o texto completo fica na dica): classe e centro de custo só pelos códigos
+    (ex.: "Classe 271 · CC 352 · sem grupo"); erro de ação ou de favorecido mostra a ação."""
+    from views.inconsistencias import detalhe_erro
+    cats = str(r.get("CATEGORIA_ERRO", "")).upper()
+    if "CLASSE" not in cats:
+        return detalhe_erro(r)
+    cod = lambda t: ", ".join(dict.fromkeys(re.findall(r"(?m)^\s*(\d+)\s*-", str(t or ""))))
+    partes = [f"Classe {cod(r.get('CLASSE'))}".strip(), f"CC {cod(r.get('CENTRO_CUSTO'))}" if cod(r.get("CENTRO_CUSTO")) else ""]
+    if "AGENTE" in cats:
+        grupo = r.get("GRUPO_FINANCEIRO")
+        partes.append("sem grupo" if grupo is None or pd.isna(grupo) or not str(grupo).strip() else str(grupo))
+    return " · ".join(x for x in partes if x)
+
+
+def _html_inconsistencias(df: pd.DataFrame, ocultar: bool, ini: datetime.date, fim: datetime.date) -> str:
+    """Card de Inconsistências de Lançamentos: o total do mês em número grande à esquerda e, no meio, três lançamentos à vista; a lista sobe sozinha uma
+    linha a cada 3 s (só CSS; pausa com o mouse). O botão Abrir é um botão do Streamlit posicionado por cima do canto direito do card. Sem
+    inconsistência: aviso em verde."""
+    base = ('.rpi{position:relative;display:flex;align-items:center;gap:18px;background:#1e1e2e;border-radius:12px;border-top:4px solid @COR@;'
+            'box-sizing:border-box;padding:10px 150px 10px 18px;width:100%}.rpi-e{display:flex;align-items:baseline;gap:8px;flex:0 0 250px}'
+            '.rpi-n0{font-size:40px;line-height:1;font-weight:700}.rpi-t{font-size:14px;font-weight:600;color:#e0e0e0}.rpi-s{font-size:11px;color:#8892a4}'
+            '.rpi-j{flex:1;min-width:0;overflow:hidden;position:relative}'
+            '.rpi-i{display:grid;grid-template-columns:112px 205px 150px 84px minmax(0,1fr) minmax(0,1fr) 78px minmax(0,1fr) 84px 100px;gap:12px;align-items:center;font-size:13px;height:@LIN@px}'
+            '.rpi-h{height:18px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#6b7385;border-bottom:1px solid #2a2a3a;margin-bottom:2px}'
+            '.rpi-x{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+            '.rpi-et{display:inline-block;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:600;white-space:nowrap}').replace("@LIN@", str(_LIN_INC))
+    rotulo = "<div><div class='rpi-t'>Inconsistências</div><div class='rpi-s'>de lançamentos · mês vigente</div></div>"
+    if df is None or df.empty:
+        return (f"<style>{base.replace('@COR@', '#22c55e')}</style><div class='rpi'><div class='rpi-e'><b class='rpi-n0' style='color:#6fd69a'>0</b>{rotulo}</div>"
+                f"<div class='rpi-j' style='color:#6fd69a;font-size:14px;font-weight:600;height:{_LIN_INC}px;line-height:{_LIN_INC}px'>"
+                f"Nenhuma inconsistência de {ini:%d/%m} a {fim:%d/%m}</div></div>")
+    d = df.sort_values("DATA", ascending=False).head(_MAX_INC)
+    n = len(d)
+
+    def linha(r) -> str:
+        fundo, cor = _COR_REGRA_INC.get(str(r["CATEGORIA_ERRO"]).split("|")[0].strip(), ("rgba(156,163,175,.22)", "#d1d5db"))
+        regra = escape(str(r["CATEGORIA_ERRO"]).replace("ERRO ", "").replace(" | ", " + "))
+        saldo = "••••" if ocultar else f"{float(r['SALDO']):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        origem = {"MOVIMENTO FINANCEIRO": "Mov. Financeiro", "MOV. CONTAS A PAGAR": "Mov. Contas a Pagar", "CONTAS A PAGAR": "Contas a Pagar", "CONTAS A RECEBER": "Contas a Receber"}.get(str(r.get("ORIGEM", "")), "")
+        from views.inconsistencias import agente, detalhe_erro, numeracao, numero_ap
+        acao = detalhe_erro(r)
+        return (f'<div class="rpi-i" title="{escape(acao, quote=True)}"><span class="rpi-x" style="color:#c9d1e3;font-size:11px">{escape(origem)}</span>'
+                f'<span><span class="rpi-et" style="background:{fundo};color:{cor}">{regra}</span></span>'
+                f'<span class="rpi-x">{numeracao(r)}</span><span class="rpi-x">{numero_ap(r)}</span>'
+                f'<span class="rpi-x" style="color:#aab0c0" title="{escape(acao, quote=True)}">{escape(_detalhe_curto(r))}</span>'
+                f'<span class="rpi-x" style="color:#aab0c0" title="{escape(agente(r, "BANCO"), quote=True)}">{escape(agente(r, "BANCO"))}</span>'
+                f'<span style="color:#8892a4">{pd.Timestamp(r["DATA"]):%d/%m/%Y}</span>'
+                f'<span class="rpi-x" style="color:#aab0c0" title="{escape(agente(r, "FORNECEDOR"), quote=True)}">{escape(agente(r, "FORNECEDOR"))}</span>'
+                f'<span style="text-align:right;color:{"#f3a3a2" if float(r["SALDO"]) < 0 else "#e0e0e0"}">{saldo}</span>'
+                f'<span class="rpi-x" style="color:#8892a4">{escape(str(r["SOLICITANTE"]))}</span></div>')
+    linhas = [linha(r) for r in d.to_dict("records")]
+    vistas = min(n, _VISTAS_INC)
+    anim = ""
+    if n > _VISTAS_INC:
+        linhas += linhas[:_VISTAS_INC]                  # as primeiras de novo no fim: a volta ao começo não aparece
+        f = 100 / n                                     # parte do ciclo de cada linha
+        m = f * 0.2                                     # 0,6 s de subida em cada 3 s
+        quadros = "0%{transform:translateY(0)}"
+        for k in range(n):
+            quadros += f"{(k + 1) * f - m:.3f}%{{transform:translateY(-{k * _LIN_INC}px)}}{(k + 1) * f:.3f}%{{transform:translateY(-{(k + 1) * _LIN_INC}px)}}"
+        anim = f"@keyframes rpis{{{quadros}}}.rpi-l{{animation:rpis {_SEG_INC * n}s ease-in-out infinite}}.rpi:hover .rpi-l{{animation-play-state:paused}}"
+    return (f"<style>{base.replace('@COR@', '#E24B4A')}{anim}</style><div class='rpi'><div class='rpi-e'><b class='rpi-n0' style='color:#ef4444'>{len(df)}</b>{rotulo}</div>"
+            f"<div style='flex:1;min-width:0'><div class='rpi-i rpi-h'><span>Origem</span><span>Erro</span><span>Documento</span><span>AP</span><span>Detalhe do erro</span><span>Banco</span><span>Data</span><span>Fornecedor</span><span style='text-align:right'>Valor</span><span>Solicitante</span></div><div class='rpi-j' style='height:{vistas * _LIN_INC}px'><div class='rpi-l'>{''.join(linhas)}</div></div></div></div>")
+
+
+def _card_inconsistencias(ocultar: bool) -> None:
+    """Card de Inconsistências abaixo dos quatro cartões, só para quem tem o painel de Inconsistências: o Abrir (dentro do card, no canto direito) leva ao painel."""
+    from services.data_service import carregar_aps_erro
+    hoje = datetime.date.today()
+    ini, fim = hoje.replace(day=1), hoje.replace(day=calendar.monthrange(hoje.year, hoje.month)[1])
+    df = carregar_aps_erro(ini.strftime("%d/%m/%Y"), fim.strftime("%d/%m/%Y"))
+    with st.container(key="rp_inc"):
+        st.html("<style>.st-key-rp_inc{position:relative}.st-key-rp_inc .st-key-rp_inc_abrir{position:absolute;right:18px;top:50%;transform:translateY(-50%);"
+                "width:auto;z-index:2}.st-key-rp_inc .st-key-rp_inc_abrir button{min-height:2rem;padding:.15rem .9rem}</style>")
+        st.html(_html_inconsistencias(df, ocultar, ini, fim))
+        st.button("Abrir", icon=":material/open_in_new:", key="rp_inc_abrir", help="Abrir o painel de Inconsistências de Lançamentos no mês vigente",
+                  on_click=_abrir_relatorio, args=("Tesouraria > Inconsistências", {"_inc_periodo": (ini, fim)}))
+
+
 def _sem_controle_repetido(notas: pd.DataFrame, pedidos) -> pd.DataFrame:
     """Um controle de venda aparece uma vez só: o controle ainda sem nota (NF vazia) que já está na lista de pedidos sai das notas,
     senão o mesmo controle vinha duas vezes ("NF nan" e "PV 21847"), enquanto o SyncProcess mostra uma validação."""
@@ -826,6 +915,8 @@ def render(df_cr: pd.DataFrame, documental: bool = False, df_grupo_agentes=None,
         cards = [] if documental else [_card_descontos(df_cr), _card_boletos(df_cr), _card_notas(notas), _card_esperado_recebido(df_cr, ocultar)]
     if not documental:
         _desenhar_cards(cards, df_cr)
+        if st.session_state.get("_inc_visivel"):
+            _card_inconsistencias(ocultar)
 
     if notas is None:
         st.info("Não foi possível consultar as notas pendentes de validação agora.")

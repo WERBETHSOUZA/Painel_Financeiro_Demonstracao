@@ -413,7 +413,7 @@ def carregar_lista_clientes() -> pd.DataFrame:
 
 
 # ── Contas a Pagar, aprovação e relatórios ─────────────────────────────────────
-_COLUNAS_ERRO = ["ORGANIZACAO", "COD_FILIAL", "NOME_FILIAL", "SEGMENTO", "CATEGORIA_ERRO", "AP", "DOCUMENTO", "TIPO", "COD_AGENTE",
+_COLUNAS_ERRO = ["ORGANIZACAO", "COD_FILIAL", "NOME_FILIAL", "SEGMENTO", "ORIGEM", "CATEGORIA_ERRO", "AP", "DOCUMENTO", "TIPO", "COD_AGENTE",
                  "TIPO_AGENTE", "NOME_AGENTE", "DATA", "SALDO", "TIPO_ACAO", "COD_ACAO", "ACAO", "CLASSE", "CENTRO_CUSTO",
                  "SOLICITANTE", "NUM_LANCTO"]
 
@@ -528,6 +528,7 @@ def carregar_aps_erro(data_inicio: str, data_fim: str) -> pd.DataFrame:
     e["ORGANIZACAO"] = 6
     e["SEGMENTO"] = rng.choice(["COMERCIAL", "INDUSTRIAL", "ADMINISTRATIVO"], size=len(e))
     e["TIPO"] = "NF"
+    e["ORIGEM"] = rng.choice(["CONTAS A PAGAR", "MOVIMENTO FINANCEIRO", "CONTAS A RECEBER"], size=len(e))
     e["COD_AGENTE"] = 3000 + np.arange(len(e))
     e["TIPO_AGENTE"] = "FORNECEDOR"
     e["AP"] = e["AP"].astype(float)

@@ -410,7 +410,7 @@ ROTULOS_MENU = {
     "Financeiro > Mercado Interno": "Contas a Receber - MI",
     "Financeiro > Mercado Externo": "Contas a Receber - ME",
     "Financeiro > Visão Geral MI-ME": "Contas a Receber - Visão Geral",
-    "Financeiro > Inconsistências": "Inconsistências de Lançamento",
+    "Tesouraria > Inconsistências": "Inconsistências de Lançamento",
     "Tesouraria > Recebimento por Banco": "Recebimentos por Banco",
     "Comercial > Visão Geral Comercial": "Visão Geral Comercial - MI",
     "Comercial > Pendências Gestão Documental": "Pendências Gestão Documental",
@@ -430,7 +430,7 @@ _ICONES_MENU = {
     "Financeiro > Visão Geral MI-ME": '<path d="M4 13V9M8 13V4M12 13V7M2.5 14h11"/>',
     "Financeiro > Mercado Interno": '<path d="M8 14s-4.5-4-4.5-7.5a4.5 4.5 0 0 1 9 0C12.5 10 8 14 8 14z"/><circle cx="8" cy="6.5" r="1.6"/>',
     "Financeiro > Mercado Externo": '<circle cx="8" cy="8" r="6"/><ellipse cx="8" cy="8" rx="2.5" ry="6"/><path d="M2 8h12"/>',
-    "Financeiro > Inconsistências": '<circle cx="8" cy="8" r="6"/><path d="M8 4.8v4M8 11.2v.1"/>',
+    "Tesouraria > Inconsistências": '<circle cx="8" cy="8" r="6"/><path d="M8 4.8v4M8 11.2v.1"/>',
     "Tesouraria > Saldos Bancários": '<rect x="2" y="4" width="12" height="9" rx="1.5"/><path d="M2 7h12"/><circle cx="11" cy="10" r=".6"/>',
     "Tesouraria > Extratos Bancários": '<path d="M3 6h10M10.5 3.5 13 6l-2.5 2.5M13 10.5H3M5.5 8 3 10.5 5.5 13"/>',
     "Tesouraria > Pendências de Conciliação": '<rect x="3" y="2.5" width="10" height="11" rx="1.5"/><path d="M5.5 6.5l1.5 1.5 3-3M5.5 11h5"/>',
@@ -508,10 +508,10 @@ PAINEIS_ADMIN = [
         ("📊", "Visão Geral MI-ME"),
         ("🇧🇷", "Mercado Interno"),
         ("🌎", "Mercado Externo"),
-        ("❌", "Inconsistências"),
     ]),
     ("🏛️", "Tesouraria", [
         ("🧾", "Pendências de Conciliação"),
+        ("❌", "Inconsistências"),
         ("💵", "Recebimento por Banco"),
     ]),
     ("🛒", "Comercial", [
@@ -529,10 +529,10 @@ PAINEIS_ANALISTA = [
         ("📊", "Visão Geral MI-ME"),
         ("🇧🇷", "Mercado Interno"),
         ("🌎", "Mercado Externo"),
-        ("❌", "Inconsistências"),
     ]),
     ("🏛️", "Tesouraria", [
         ("🧾", "Pendências de Conciliação"),
+        ("❌", "Inconsistências"),
         ("💵", "Recebimento por Banco"),
     ]),
     ("🛒", "Comercial", [
@@ -1063,6 +1063,7 @@ if st.session_state["_painel_ativo"] in _relatorios_antigos:
 
 # ── Garante que analista não acesse painéis restritos ─────────────────────────
 paineis_permitidos = _paineis_folha(paineis) + PAINEIS_FIXOS + (["Relatórios"] if paginas_relatorios_visiveis else [])
+st.session_state["_inc_visivel"] = "Tesouraria > Inconsistências" in paineis_permitidos      # o card de Inconsistências do Resumo Pendências só aparece para quem tem o painel
 if st.session_state["_painel_ativo"] is not None and st.session_state["_painel_ativo"] not in paineis_permitidos:
     st.session_state["_painel_ativo"] = None
     st.rerun()
@@ -1092,7 +1093,7 @@ with st.container():
             unsafe_allow_html=True,
         )
 
-    elif painel_atual == "Financeiro > Inconsistências":
+    elif painel_atual == "Tesouraria > Inconsistências":
         inconsistencias.render(carregar_aps_erro)       # o período é escolhido na tela e só ele vai ao banco
 
     elif painel_atual in ("Financeiro > Visão Geral MI-ME", "Financeiro > Mercado Interno", "Financeiro > Mercado Externo"):
